@@ -4,7 +4,7 @@ from typing import Any
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, get_datetime, now_datetime
+from frappe.utils import cint, convert_utc_to_system_timezone, flt, get_datetime, now_datetime
 
 from ione_agent.gateway import GatewayClient, GatewayError
 
@@ -108,6 +108,14 @@ def _serialize_run(doc, events: list[dict[str, Any]] | None = None) -> dict[str,
 		"model": doc.model,
 		"events": events or [],
 	}
+
+
+def _gateway_datetime(value: str):
+	"""Convert an ISO timestamp from the gateway into Frappe's naive system time."""
+	datetime_value = get_datetime(value)
+	if datetime_value.tzinfo:
+		datetime_value = convert_utc_to_system_timezone(datetime_value).replace(tzinfo=None)
+	return datetime_value
 
 
 @frappe.whitelist()
@@ -280,9 +288,9 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 	run.ufo_commit = payload.get("ufo_commit") or run.ufo_commit
 	run.model = payload.get("model") or run.model
 	if payload.get("started_at"):
-		run.started_at = get_datetime(payload["started_at"])
+		run.started_at = _gateway_datetime(payload["started_at"])
 	if payload.get("completed_at"):
-		run.completed_at = get_datetime(payload["completed_at"])
+		run.completed_at = _gateway_datetime(payload["completed_at"])
 	run.elapsed_seconds = flt(payload.get("elapsed_seconds"))
 	run.save(ignore_permissions=True)
 
