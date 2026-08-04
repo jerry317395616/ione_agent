@@ -44,4 +44,3 @@ def test_recoverable_run_is_returned_to_queue(tmp_path):
 	store.update(run["run_id"], status="running", progress=30)
 	assert store.recoverable() == [run["run_id"]]
 	assert store.get(run["run_id"])["status"] == "queued"
-

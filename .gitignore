@@ -9,3 +9,5 @@ build/
 *.egg-info/
 gateway/data/
 gateway/.env
+gateway/vendor/
+.deploy-ufo.tar.gz

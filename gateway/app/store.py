@@ -4,13 +4,13 @@ import json
 import sqlite3
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 def utc_now() -> str:
-	return datetime.now(UTC).isoformat()
+	return datetime.now(timezone.utc).isoformat()
 
 
 class RunStore:

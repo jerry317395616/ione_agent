@@ -1,8 +1,5 @@
 FROM python:3.10-slim
 
-ARG UFO_REPOSITORY=https://github.com/microsoft/UFO.git
-ARG UFO_BRANCH=main
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UFO_ROOT=/opt/UFO \
@@ -12,7 +9,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git libgl1 libglib2.0-0 libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch "${UFO_BRANCH}" "${UFO_REPOSITORY}" "${UFO_ROOT}"
+COPY vendor/UFO "${UFO_ROOT}"
 
 WORKDIR /srv/ione-ufo-gateway
 COPY ufo-gateway-requirements.txt ./ufo-gateway-requirements.txt

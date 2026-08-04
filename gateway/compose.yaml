@@ -2,7 +2,7 @@ services:
   ione-ufo-gateway:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ${IONE_GATEWAY_DOCKERFILE:-Dockerfile}
     image: ione-ufo-gateway:main
     container_name: ione-ufo-gateway
     restart: unless-stopped
@@ -14,4 +14,3 @@ services:
       - ./data:/data
     security_opt:
       - no-new-privileges:true
-

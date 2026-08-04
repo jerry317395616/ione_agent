@@ -24,13 +24,18 @@ def git_commit(repo: Path) -> str:
 
 
 def configure_ufo(settings: Settings) -> None:
+	system_path = settings.ufo_root / "config" / "ufo" / "system.yaml"
+	system = yaml.safe_load(system_path.read_text(encoding="utf-8")) or {}
+	system["TOP_P"] = 0.8
+	system_path.write_text(yaml.safe_dump(system, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
 	config_dir = settings.ufo_root / "config" / "galaxy"
 	config_dir.mkdir(parents=True, exist_ok=True)
 	agent_config = {
 		"CONSTELLATION_AGENT": {
 			"REASONING_MODEL": False,
 			"API_TYPE": "openai",
-			"API_BASE": settings.chat_completions_url,
+			"API_BASE": settings.openai_base_url,
 			"API_KEY": settings.qwen_api_key,
 			"API_MODEL": settings.qwen_model,
 			"CONSTELLATION_CREATION_PROMPT": "galaxy/prompts/constellation/share/constellation_creation.yaml",
@@ -48,6 +53,7 @@ def configure_ufo(settings: Settings) -> None:
 	constellation_path = config_dir / "constellation.yaml"
 	constellation = yaml.safe_load(constellation_path.read_text(encoding="utf-8")) or {}
 	constellation["MAX_STEP"] = settings.max_step
+	constellation["TOP_P"] = 0.8
 	constellation["DEVICE_INFO"] = "config/galaxy/devices.yaml"
 	constellation_path.write_text(
 		yaml.safe_dump(constellation, allow_unicode=True, sort_keys=False), encoding="utf-8"

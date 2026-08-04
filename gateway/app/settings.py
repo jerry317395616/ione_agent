@@ -47,7 +47,5 @@ class Settings:
 		)
 
 	@property
-	def chat_completions_url(self) -> str:
-		if self.qwen_api_base.endswith("/chat/completions"):
-			return self.qwen_api_base
-		return f"{self.qwen_api_base}/chat/completions"
+	def openai_base_url(self) -> str:
+		return self.qwen_api_base.removesuffix("/chat/completions").rstrip("/")

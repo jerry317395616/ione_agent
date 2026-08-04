@@ -2,6 +2,8 @@
 
 The gateway isolates Microsoft UFO3 from the Frappe runtime. It accepts authenticated asynchronous runs, executes them serially through the official UFO3 `main` branch and persists run state in SQLite.
 
+The image uses `ufo-gateway-requirements.txt`, which keeps Galaxy orchestration, AIP, MCP and OpenAI-compatible inference while excluding local embedding/training and GPU packages that the gateway does not use.
+
 ## Required environment
 
 - `IONE_GATEWAY_TOKEN`: long random token shared only with the Frappe site configuration.
@@ -21,3 +23,4 @@ curl http://127.0.0.1:8098/health
 
 UFO3 is cloned from the official repository's `main` branch during image build. The exact commit is reported by `/health` and stored on every Frappe run record.
 
+For restricted server networks, place a verified official checkout at `vendor/UFO` and set `IONE_GATEWAY_DOCKERFILE=Dockerfile.offline`. The vendor directory is intentionally excluded from Git.

@@ -7,6 +7,7 @@ GATEWAY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(GATEWAY_ROOT))
 
 from app.runtime import build_prompt, extract_answer  # noqa: E402
+from app.settings import Settings  # noqa: E402
 
 
 def test_build_prompt_keeps_recent_context():
@@ -36,3 +37,18 @@ def test_extract_answer_can_use_agent_event():
 	]
 	assert extract_answer({}, events) == "来自 UFO3 事件的结果"
 
+
+def test_openai_base_url_does_not_duplicate_chat_completions(tmp_path):
+	settings = Settings(
+		gateway_token="secret",
+		qwen_api_base="http://qwen:1234/v1/chat/completions",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		ufo_root=tmp_path,
+		data_dir=tmp_path,
+		max_rounds=10,
+		max_step=15,
+		devices={"devices": []},
+	)
+
+	assert settings.openai_base_url == "http://qwen:1234/v1"
