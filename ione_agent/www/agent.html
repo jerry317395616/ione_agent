@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{{ title }}</title>
+  <link rel="icon" href="/assets/ione_agent/images/ione-agent-logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/ione_agent/css/agent.css">
+</head>
+<body>
+  <div id="agent-app" class="agent-shell" aria-busy="true">
+    <aside id="session-sidebar" class="session-sidebar" aria-label="对话历史">
+      <div class="brand-row">
+        <img src="/assets/ione_agent/images/ione-agent-logo.svg" alt="" width="34" height="34">
+        <div>
+          <strong>I-ONE Agent</strong>
+          <span>UFO³ 智能执行</span>
+        </div>
+        <button id="close-sidebar" class="icon-button mobile-only" type="button" aria-label="关闭对话列表" title="关闭">
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <button id="new-session" class="new-session-button" type="button">
+        <span aria-hidden="true">＋</span><span>新建对话</span>
+      </button>
+      <div class="history-heading">
+        <span>最近对话</span>
+        <button id="refresh-sessions" class="icon-button" type="button" aria-label="刷新对话列表" title="刷新">
+          <span aria-hidden="true">↻</span>
+        </button>
+      </div>
+      <nav id="session-list" class="session-list" aria-label="最近对话"></nav>
+      <div class="sidebar-footer">
+        <span id="sidebar-user">{{ user }}</span>
+        <a href="/desk" title="返回应用桌面">应用桌面</a>
+      </div>
+    </aside>
+
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+    <main class="conversation-panel">
+      <header class="conversation-header">
+        <button id="open-sidebar" class="icon-button mobile-only" type="button" aria-label="打开对话列表" title="对话列表">
+          <span aria-hidden="true">☰</span>
+        </button>
+        <div class="conversation-title">
+          <strong id="conversation-title">新对话</strong>
+          <span id="conversation-subtitle">让 UFO³ 规划并执行你的任务</span>
+        </div>
+        <div id="gateway-indicator" class="gateway-indicator" data-status="checking">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="gateway-label">正在检查服务</span>
+        </div>
+      </header>
+
+      <section id="message-scroll" class="message-scroll" aria-live="polite">
+        <div id="empty-state" class="empty-state">
+          <img src="/assets/ione_agent/images/ione-agent-logo.svg" alt="" width="58" height="58">
+          <h1>今天需要完成什么？</h1>
+          <p>描述目标、约束和期望结果，UFO³ 会拆解任务并调用已连接的执行设备。</p>
+          <div class="suggestion-grid" aria-label="示例指令">
+            <button class="suggestion" type="button" data-prompt="分析本周销售与回款情况，列出异常并给出下一步建议。">
+              <strong>经营分析</strong><span>汇总业务数据并识别异常</span>
+            </button>
+            <button class="suggestion" type="button" data-prompt="梳理今天需要跟进的客户和任务，按优先级生成行动清单。">
+              <strong>任务规划</strong><span>形成可执行的优先级清单</span>
+            </button>
+            <button class="suggestion" type="button" data-prompt="检查当前库存风险，重点说明短缺、积压和补货建议。">
+              <strong>库存检查</strong><span>发现短缺与积压风险</span>
+            </button>
+          </div>
+        </div>
+        <div id="message-list" class="message-list"></div>
+      </section>
+
+      <section id="run-panel" class="run-panel" hidden aria-live="polite">
+        <div class="run-summary">
+          <span id="run-spinner" class="run-spinner" aria-hidden="true"></span>
+          <div>
+            <strong id="run-stage">UFO³ 正在处理</strong>
+            <span id="run-meta">正在建立执行计划</span>
+          </div>
+          <button id="stop-run" class="stop-button" type="button">停止</button>
+        </div>
+        <div class="progress-track" aria-hidden="true"><span id="run-progress"></span></div>
+        <ol id="event-list" class="event-list"></ol>
+      </section>
+
+      <footer class="composer-wrap">
+        <form id="composer" class="composer">
+          <textarea id="message-input" rows="1" maxlength="12000" placeholder="给 I-ONE Agent 发送任务" aria-label="输入任务"></textarea>
+          <div class="composer-actions">
+            <span id="composer-hint">Enter 发送，Shift + Enter 换行</span>
+            <button id="send-message" class="send-button" type="submit" aria-label="发送" title="发送">
+              <span>发送</span><span aria-hidden="true">↑</span>
+            </button>
+          </div>
+        </form>
+        <p class="safety-note">智能体可能执行真实操作，请在接入设备时遵循最小权限原则。</p>
+      </footer>
+    </main>
+  </div>
+
+  <div id="toast-region" class="toast-region" aria-live="assertive"></div>
+  <script src="/assets/ione_agent/js/agent.js" defer></script>
+</body>
+</html>
+

@@ -1,0 +1,32 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:IONE-AGENT-SESSION-{YYYY}-{#####}",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["title", "user", "status", "column_break", "last_message_at", "message_count", "gateway_session_id", "last_run"],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "label": "对话标题", "reqd": 1, "in_list_view": 1, "search_index": 1},
+  {"fieldname": "user", "fieldtype": "Link", "label": "用户", "options": "User", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "status", "fieldtype": "Select", "label": "状态", "options": "Active\nRunning\nCompleted\nFailed\nStopped\nArchived", "default": "Active", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "column_break", "fieldtype": "Column Break"},
+  {"fieldname": "last_message_at", "fieldtype": "Datetime", "label": "最后消息时间", "read_only": 1, "in_list_view": 1},
+  {"fieldname": "message_count", "fieldtype": "Int", "label": "消息数", "read_only": 1, "default": "0"},
+  {"fieldname": "gateway_session_id", "fieldtype": "Data", "label": "UFO 会话标识", "read_only": 1, "unique": 1},
+  {"fieldname": "last_run", "fieldtype": "Link", "label": "最后一次运行", "options": "I-ONE Agent Run", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0,
+ "module": "I-ONE Agent",
+ "name": "I-ONE Agent Session",
+ "naming_rule": "Expression",
+ "permissions": [
+  {"role": "I-ONE Agent User", "create": 1, "read": 1, "write": 1},
+  {"role": "I-ONE Agent Manager", "create": 1, "read": 1, "write": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "System Manager", "create": 1, "read": 1, "write": 1, "delete": 1, "report": 1, "export": 1}
+ ],
+ "search_fields": "title,user,gateway_session_id",
+ "sort_field": "last_message_at",
+ "sort_order": "DESC",
+ "states": []
+}
+

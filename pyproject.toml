@@ -1,0 +1,29 @@
+[project]
+name = "ione_agent"
+authors = [
+    { name = "I-ONE", email = "317395616@qq.com" }
+]
+description = "I-ONE Agent conversation workspace powered by UFO3"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = []
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.frappe-dependencies]
+frappe = ">=17.0.0-dev,<18.0.0"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = ["E101", "E501", "W191", "RUF001"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"

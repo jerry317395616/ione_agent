@@ -1,0 +1,17 @@
+services:
+  ione-ufo-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ione-ufo-gateway:main
+    container_name: ione-ufo-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${IONE_GATEWAY_BIND:-127.0.0.1}:8098:8098"
+    volumes:
+      - ./data:/data
+    security_opt:
+      - no-new-privileges:true
+

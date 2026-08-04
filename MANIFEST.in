@@ -1,0 +1,13 @@
+include README.md
+include SECURITY.md
+include CHANGELOG.md
+include license.txt
+recursive-include ione_agent *.css
+recursive-include ione_agent *.csv
+recursive-include ione_agent *.html
+recursive-include ione_agent *.js
+recursive-include ione_agent *.json
+recursive-include ione_agent *.md
+recursive-include ione_agent *.py
+recursive-include ione_agent *.svg
+

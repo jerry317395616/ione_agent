@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:IONE-AGENT-MSG-{YYYY}-{########}",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["session", "user", "role", "sequence", "sent_at", "column_break", "message_type", "run", "visible", "content", "event_section", "event_type", "tool_name", "tool_status", "event_data"],
+ "fields": [
+  {"fieldname": "session", "fieldtype": "Link", "label": "对话", "options": "I-ONE Agent Session", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "user", "fieldtype": "Link", "label": "用户", "options": "User", "reqd": 1, "in_standard_filter": 1},
+  {"fieldname": "role", "fieldtype": "Select", "label": "消息角色", "options": "user\nassistant\nsystem\ntool", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "sequence", "fieldtype": "Int", "label": "顺序", "reqd": 1, "read_only": 1, "in_list_view": 1},
+  {"fieldname": "sent_at", "fieldtype": "Datetime", "label": "发送时间", "reqd": 1, "read_only": 1, "in_list_view": 1},
+  {"fieldname": "column_break", "fieldtype": "Column Break"},
+  {"fieldname": "message_type", "fieldtype": "Select", "label": "消息类型", "options": "text\nevent\nerror", "default": "text", "reqd": 1},
+  {"fieldname": "run", "fieldtype": "Link", "label": "运行记录", "options": "I-ONE Agent Run", "read_only": 1},
+  {"fieldname": "visible", "fieldtype": "Check", "label": "用户可见", "default": "1"},
+  {"fieldname": "content", "fieldtype": "Long Text", "label": "消息内容", "reqd": 1},
+  {"fieldname": "event_section", "fieldtype": "Section Break", "label": "执行事件", "collapsible": 1, "depends_on": "eval:doc.message_type!='text'"},
+  {"fieldname": "event_type", "fieldtype": "Data", "label": "事件类型", "read_only": 1},
+  {"fieldname": "tool_name", "fieldtype": "Data", "label": "工具名称", "read_only": 1},
+  {"fieldname": "tool_status", "fieldtype": "Data", "label": "工具状态", "read_only": 1},
+  {"fieldname": "event_data", "fieldtype": "Code", "label": "事件数据", "options": "JSON", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0,
+ "module": "I-ONE Agent",
+ "name": "I-ONE Agent Message",
+ "naming_rule": "Expression",
+ "permissions": [
+  {"role": "I-ONE Agent User", "read": 1},
+  {"role": "I-ONE Agent Manager", "read": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "System Manager", "read": 1, "delete": 1, "report": 1, "export": 1}
+ ],
+ "search_fields": "session,content,user,run",
+ "sort_field": "sent_at",
+ "sort_order": "ASC",
+ "states": []
+}
+
