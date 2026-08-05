@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-import websockets
 import yaml
 
 from app.settings import Settings
@@ -23,6 +24,26 @@ WINDOWS_EXECUTION_GUIDANCE = (
 	"Open the target application directly (for example excel.exe, winword.exe, or notepad.exe), "
 	"then complete the task through UI automation. Include this rule in every Windows task description and tips."
 )
+
+
+def probe_websocket_server(host: str, port: int, path: str, timeout: float = 5) -> bool:
+	key = base64.b64encode(os.urandom(16)).decode("ascii")
+	request = (
+		f"GET {path} HTTP/1.1\r\n"
+		f"Host: {host}:{port}\r\n"
+		"Upgrade: websocket\r\n"
+		"Connection: Upgrade\r\n"
+		f"Sec-WebSocket-Key: {key}\r\n"
+		"Sec-WebSocket-Version: 13\r\n\r\n"
+	).encode("ascii")
+	try:
+		with socket.create_connection((host, port), timeout=timeout) as connection:
+			connection.settimeout(timeout)
+			connection.sendall(request)
+			response = connection.recv(4096)
+	except OSError:
+		return False
+	return response.startswith(b"HTTP/1.1 101")
 
 
 def git_commit(repo: Path) -> str:
@@ -175,7 +196,8 @@ class UFORuntime:
 		self.client = None
 		self.current_run_id: str | None = None
 		self.worker_task: asyncio.Task | None = None
-		self.device_server_watchdog_task: asyncio.Task | None = None
+		self.device_server_watchdog_thread: threading.Thread | None = None
+		self.device_server_watchdog_stop = threading.Event()
 		self.device_server_watchdog_checks = 0
 		self.device_server_process: asyncio.subprocess.Process | None = None
 		self.device_server_lock = asyncio.Lock()
@@ -189,9 +211,12 @@ class UFORuntime:
 		if str(self.settings.ufo_root) not in sys.path:
 			sys.path.insert(0, str(self.settings.ufo_root))
 		await self._start_device_server()
-		self.device_server_watchdog_task = asyncio.create_task(
-			self._watch_device_server(), name="ione-ufo-device-server-watchdog"
+		self.device_server_watchdog_thread = threading.Thread(
+			target=self._watch_device_server,
+			name="ione-ufo-device-server-watchdog",
+			daemon=True,
 		)
+		self.device_server_watchdog_thread.start()
 		for run_id in self.store.recoverable():
 			await self.queue.put(run_id)
 		self.worker_task = asyncio.create_task(self._worker(), name="ione-ufo-runner")
@@ -203,12 +228,9 @@ class UFORuntime:
 				await self.worker_task
 			except asyncio.CancelledError:
 				pass
-		if self.device_server_watchdog_task:
-			self.device_server_watchdog_task.cancel()
-			try:
-				await self.device_server_watchdog_task
-			except asyncio.CancelledError:
-				pass
+		self.device_server_watchdog_stop.set()
+		if self.device_server_watchdog_thread:
+			self.device_server_watchdog_thread.join(timeout=2)
 		if self.client:
 			await self.client.shutdown(force=True)
 		if self.device_server_process and self.device_server_process.returncode is None:
@@ -269,32 +291,20 @@ class UFORuntime:
 			await asyncio.sleep(0.25)
 		raise RuntimeError("UFO device server did not become ready")
 
-	async def _watch_device_server(self) -> None:
-		upstream_url = (
-			f"ws://{self.settings.device_server_host}:{self.settings.device_server_port}/ws"
-			f"?token={quote(self.settings.device_server_api_key)}"
-		)
-		await asyncio.sleep(15)
-		while True:
-			try:
-				connection = await asyncio.wait_for(
-					websockets.connect(
-						upstream_url,
-						open_timeout=10,
-						close_timeout=1,
-					),
-					timeout=12,
-				)
-			except asyncio.CancelledError:
-				raise
-			except (TimeoutError, OSError, websockets.WebSocketException):
+	def _watch_device_server(self) -> None:
+		path = f"/ws?token={quote(self.settings.device_server_api_key)}"
+		if self.device_server_watchdog_stop.wait(15):
+			return
+		while not self.device_server_watchdog_stop.is_set():
+			if not probe_websocket_server(
+				self.settings.device_server_host,
+				self.settings.device_server_port,
+				path,
+			):
 				os._exit(75)
 			self.device_server_watchdog_checks += 1
-			try:
-				await asyncio.wait_for(connection.close(), timeout=2)
-			except (TimeoutError, OSError, websockets.WebSocketException):
-				pass
-			await asyncio.sleep(30)
+			if self.device_server_watchdog_stop.wait(30):
+				return
 
 	async def restart_device_server(
 		self, failed_process: asyncio.subprocess.Process | None = None

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+- Move the UFO device-server watchdog to an independent thread.
+- Probe the complete WebSocket handshake with an operating-system timeout.
+- Restart the gateway container when the internal device service becomes unresponsive.
+
 ## 0.2.4
 
 - Enforce a single Windows desktop executor per signed-in user.
