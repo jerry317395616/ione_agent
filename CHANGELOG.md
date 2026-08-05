@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- Use Python 3.10 for compatibility with UFO's pinned Windows dependencies.
+- Recreate only the virtual environment when an incompatible Python version is detected.
+
 ## 0.2.2
 
 - Trim the DPAPI ciphertext before loading the Windows device configuration.

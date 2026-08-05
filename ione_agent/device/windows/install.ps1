@@ -8,6 +8,7 @@ $Root = Join-Path $env:LOCALAPPDATA "I-ONE\Agent"
 $Runtime = Join-Path $Root "runtime"
 $UfoRoot = Join-Path $Runtime "UFO"
 $Venv = Join-Path $Runtime ".venv"
+$PythonVersion = "3.10"
 $ConfigPath = Join-Path $Root "device.config"
 $LogRoot = Join-Path $Root "logs"
 $TaskName = "I-ONE Agent Device"
@@ -48,7 +49,7 @@ if (-not (Test-Path $ConfigPath)) {
         pairing_token = $PairingToken
         device_id = $DeviceId
         device_name = $env:COMPUTERNAME
-        client_version = "0.2.2"
+        client_version = "0.2.3"
     }
     Write-Host "Pairing this computer with I-ONE Agent..."
     $response = Invoke-RestMethod `
@@ -83,11 +84,19 @@ if (-not (Test-Path (Join-Path $UfoRoot ".git"))) {
 }
 
 $Uv = Get-UvPath
-Write-Host "Preparing Python 3.11..."
-& $Uv python install 3.11
-if ($LASTEXITCODE -ne 0) { throw "Unable to install Python 3.11." }
-if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
-    & $Uv venv --python 3.11 $Venv
+Write-Host "Preparing Python $PythonVersion..."
+& $Uv python install $PythonVersion
+if ($LASTEXITCODE -ne 0) { throw "Unable to install Python $PythonVersion." }
+$ExistingPython = Join-Path $Venv "Scripts\python.exe"
+if (Test-Path $ExistingPython) {
+    $ExistingVersion = (& $ExistingPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+    if ($ExistingVersion -ne $PythonVersion) {
+        Write-Host "Replacing incompatible Python $ExistingVersion environment..."
+        Remove-Item -Recurse -Force $Venv
+    }
+}
+if (-not (Test-Path $ExistingPython)) {
+    & $Uv venv --python $PythonVersion $Venv
     if ($LASTEXITCODE -ne 0) { throw "Unable to create the UFO environment." }
 }
 
