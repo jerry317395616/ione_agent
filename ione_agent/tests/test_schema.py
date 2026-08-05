@@ -9,6 +9,7 @@ WINDOWS_INSTALLER = APP_ROOT / "device" / "windows" / "install.ps1"
 WINDOWS_LAUNCHER = APP_ROOT / "device" / "windows" / "launch.ps1"
 AGENT_TEMPLATE = APP_ROOT / "www" / "agent.html"
 AGENT_SCRIPT = APP_ROOT / "public" / "js" / "agent.js"
+AGENT_API = APP_ROOT / "api.py"
 
 
 def _schemas():
@@ -78,3 +79,10 @@ def test_agent_assets_are_versioned_and_device_modal_opens_without_waiting():
 	)[0]
 	assert "els.deviceModal.hidden = false" in open_modal
 	assert "await loadDevices()" not in open_modal
+
+
+def test_completed_lead_runs_can_resume_an_incomplete_frappe_sync():
+	api = AGENT_API.read_text(encoding="utf-8")
+	assert "def _run_needs_poll(doc)" in api
+	assert "task_status not in TERMINAL_DISCOVERY_STATUSES" in api
+	assert "if _run_needs_poll(doc) and doc.gateway_run_id:" in api

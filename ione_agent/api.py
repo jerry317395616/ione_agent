@@ -8,6 +8,7 @@ from frappe.utils import cint, convert_utc_to_system_timezone, flt, get_datetime
 
 from ione_agent.gateway import GatewayClient, GatewayError
 from ione_agent.lead_service import (
+	TASK_DTYPE,
 	build_discovery_payload,
 	create_task,
 	sync_task,
@@ -18,6 +19,7 @@ SESSION_DTYPE = "I-ONE Agent Session"
 MESSAGE_DTYPE = "I-ONE Agent Message"
 RUN_DTYPE = "I-ONE Agent Run"
 TERMINAL_STATUSES = {"Completed", "Failed", "Stopped"}
+TERMINAL_DISCOVERY_STATUSES = {"已完成", "部分完成", "失败", "已停止"}
 STATUS_MAP = {
 	"queued": "Queued",
 	"running": "Running",
@@ -374,11 +376,20 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 	)
 
 
+def _run_needs_poll(doc) -> bool:
+	if doc.status not in TERMINAL_STATUSES:
+		return True
+	if doc.run_type != "lead_discovery" or not doc.discovery_task:
+		return False
+	task_status = frappe.db.get_value(TASK_DTYPE, doc.discovery_task, "status")
+	return task_status not in TERMINAL_DISCOVERY_STATUSES
+
+
 @frappe.whitelist()
 def get_run(run: str) -> dict[str, Any]:
 	doc = _owned_doc(RUN_DTYPE, run)
 	events: list[dict[str, Any]] = []
-	if doc.status not in TERMINAL_STATUSES and doc.gateway_run_id:
+	if _run_needs_poll(doc) and doc.gateway_run_id:
 		try:
 			payload = (
 				OrchestratorClient().get_run(doc.gateway_run_id)
