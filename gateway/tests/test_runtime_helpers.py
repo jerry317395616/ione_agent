@@ -7,8 +7,10 @@ GATEWAY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(GATEWAY_ROOT))
 
 from app.runtime import (  # noqa: E402
+	DEVICE_KEEPALIVE_INTERVAL_SECONDS,
 	WINDOWS_EXECUTION_GUIDANCE,
 	build_prompt,
+	device_heartbeat_message,
 	extract_answer,
 	failure_message,
 	heartbeat_client_type,
@@ -164,3 +166,8 @@ def test_constellation_heartbeat_uses_registered_role():
 
 def test_device_heartbeat_keeps_device_role():
 	assert heartbeat_client_type("windows-device") == "device"
+
+
+def test_public_device_keepalive_is_valid_aip_heartbeat():
+	assert DEVICE_KEEPALIVE_INTERVAL_SECONDS < 60
+	assert device_heartbeat_message() == '{"type":"heartbeat","status":"ok"}'

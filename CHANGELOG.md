@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.10
+
+- Keep public desktop WebSockets active during long UFO planning and execution.
+- Serialize concurrent proxy and heartbeat messages on each device connection.
+
 ## 0.2.9
 
 - Record which side closes a desktop-device proxy connection.

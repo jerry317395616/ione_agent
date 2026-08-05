@@ -29,6 +29,11 @@ WINDOWS_EXECUTION_GUIDANCE = (
 )
 
 FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
+DEVICE_KEEPALIVE_INTERVAL_SECONDS = 20
+
+
+def device_heartbeat_message() -> str:
+	return json.dumps({"type": "heartbeat", "status": "ok"}, separators=(",", ":"))
 
 
 def heartbeat_client_type(client_id: str) -> str:

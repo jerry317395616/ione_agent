@@ -17,7 +17,12 @@ from starlette.websockets import WebSocketState
 
 from app.device_store import DeviceStore
 from app.models import CreateRunRequest, RegisterDeviceRequest
-from app.runtime import UFORuntime, git_commit
+from app.runtime import (
+	DEVICE_KEEPALIVE_INTERVAL_SECONDS,
+	UFORuntime,
+	device_heartbeat_message,
+	git_commit,
+)
 from app.settings import Settings
 from app.store import RunStore
 
@@ -187,6 +192,14 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 
 		try:
 			device_store.set_status(device_id, "online")
+			device_send_lock = asyncio.Lock()
+
+			async def send_to_device(message: str | bytes) -> None:
+				async with device_send_lock:
+					if isinstance(message, bytes):
+						await websocket.send_bytes(message)
+					else:
+						await websocket.send_text(message)
 
 			async def to_upstream() -> None:
 				while True:
@@ -200,14 +213,20 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 
 			async def to_device() -> None:
 				async for message in upstream:
-					if isinstance(message, bytes):
-						await websocket.send_bytes(message)
-					else:
-						await websocket.send_text(message)
+					await send_to_device(message)
+
+			async def keep_device_alive() -> None:
+				# UFO's application heartbeat defaults to 120 seconds. Public tunnels
+				# may retire quieter WebSockets before then, including while UFO is
+				# planning a task, so send a valid AIP heartbeat more frequently.
+				while True:
+					await asyncio.sleep(DEVICE_KEEPALIVE_INTERVAL_SECONDS)
+					await send_to_device(device_heartbeat_message())
 
 			tasks = [
 				asyncio.create_task(to_upstream(), name="device-to-ufo"),
 				asyncio.create_task(to_device(), name="ufo-to-device"),
+				asyncio.create_task(keep_device_alive(), name="device-keepalive"),
 			]
 			done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 			for task in done:
@@ -220,6 +239,7 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 				logger.warning("Device proxy %s ended for %s: %s", task.get_name(), device_id, reason)
 			for task in pending:
 				task.cancel()
+			await asyncio.gather(*pending, return_exceptions=True)
 			for task in done:
 				task.result()
 		finally:
