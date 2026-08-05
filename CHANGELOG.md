@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.8
+
+- Keep the local UFO device proxy alive during long model-planning calls.
+- Correct UFO Galaxy heartbeat role metadata without modifying upstream UFO source.
+
 ## 0.2.7
 
 - Correctly treat nested UFO3 constellation failures as failed runs.

@@ -31,6 +31,40 @@ WINDOWS_EXECUTION_GUIDANCE = (
 FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
 
 
+def heartbeat_client_type(client_id: str) -> str:
+	return "constellation" if "@" in client_id else "device"
+
+
+def patch_constellation_heartbeat() -> None:
+	"""Keep UFO main's Galaxy heartbeat bound to its registered role.
+
+	UFO main currently registers Galaxy connections as ``constellation`` but
+	uses a heartbeat whose model default is ``device``. The hardened UFO server
+	rejects that mismatch. This process-local compatibility patch affects Galaxy
+	only; the official UFO source and separate device server remain unchanged.
+	"""
+	from aip.messages import ClientMessage, ClientMessageType, ClientType, TaskStatus
+	from aip.protocol.heartbeat import HeartbeatProtocol
+
+	if getattr(HeartbeatProtocol.send_heartbeat, "_ione_constellation_compatible", False):
+		return
+
+	async def send_heartbeat(self, client_id: str, metadata: dict[str, Any] | None = None) -> None:
+		client_type = ClientType(heartbeat_client_type(client_id))
+		message = ClientMessage(
+			type=ClientMessageType.HEARTBEAT,
+			client_id=client_id,
+			client_type=client_type,
+			status=TaskStatus.OK,
+			timestamp=utc_now(),
+			metadata=metadata,
+		)
+		await self.send_message(message)
+
+	send_heartbeat._ione_constellation_compatible = True
+	HeartbeatProtocol.send_heartbeat = send_heartbeat
+
+
 def probe_websocket_server(host: str, port: int, path: str, timeout: float = 5) -> bool:
 	key = base64.b64encode(os.urandom(16)).decode("ascii")
 	request = (
@@ -477,6 +511,7 @@ class UFORuntime:
 		from galaxy.core.events import get_event_bus
 		from galaxy.galaxy_client import GalaxyClient
 
+		patch_constellation_heartbeat()
 		get_galaxy_config(reload=True)
 		self.client = GalaxyClient(max_rounds=self.settings.max_rounds, log_level="WARNING")
 		await self.client.initialize()

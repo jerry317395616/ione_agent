@@ -11,6 +11,7 @@ from app.runtime import (  # noqa: E402
 	build_prompt,
 	extract_answer,
 	failure_message,
+	heartbeat_client_type,
 	probe_websocket_server,
 	result_failed,
 )
@@ -155,3 +156,11 @@ def test_probe_websocket_server_rejects_unresponsive_service(monkeypatch):
 	monkeypatch.setattr("app.runtime.socket.create_connection", timeout)
 
 	assert probe_websocket_server("127.0.0.1", 5000, "/ws?token=secret") is False
+
+
+def test_constellation_heartbeat_uses_registered_role():
+	assert heartbeat_client_type("task@windows-device") == "constellation"
+
+
+def test_device_heartbeat_keeps_device_role():
+	assert heartbeat_client_type("windows-device") == "device"

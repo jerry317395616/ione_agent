@@ -160,7 +160,16 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 		failed_process = runtime.device_server_process
 		for attempt in range(2):
 			try:
-				upstream = await websockets.connect(upstream_url, max_size=None, open_timeout=10)
+				# UFO can pause local ping responses during long model-planning calls.
+				# The public device connection already has its own keepalive, so pings
+				# on this local proxy hop only create false disconnects.
+				upstream = await websockets.connect(
+					upstream_url,
+					max_size=None,
+					open_timeout=10,
+					ping_interval=None,
+					close_timeout=2,
+				)
 				break
 			except (TimeoutError, OSError):
 				if attempt:
