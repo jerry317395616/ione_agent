@@ -9,7 +9,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
+import websockets
 import yaml
 
 from app.settings import Settings
@@ -173,6 +175,7 @@ class UFORuntime:
 		self.client = None
 		self.current_run_id: str | None = None
 		self.worker_task: asyncio.Task | None = None
+		self.device_server_watchdog_task: asyncio.Task | None = None
 		self.device_server_process: asyncio.subprocess.Process | None = None
 		self.device_server_lock = asyncio.Lock()
 		self.devices_dirty = False
@@ -185,6 +188,9 @@ class UFORuntime:
 		if str(self.settings.ufo_root) not in sys.path:
 			sys.path.insert(0, str(self.settings.ufo_root))
 		await self._start_device_server()
+		self.device_server_watchdog_task = asyncio.create_task(
+			self._watch_device_server(), name="ione-ufo-device-server-watchdog"
+		)
 		for run_id in self.store.recoverable():
 			await self.queue.put(run_id)
 		self.worker_task = asyncio.create_task(self._worker(), name="ione-ufo-runner")
@@ -194,6 +200,12 @@ class UFORuntime:
 			self.worker_task.cancel()
 			try:
 				await self.worker_task
+			except asyncio.CancelledError:
+				pass
+		if self.device_server_watchdog_task:
+			self.device_server_watchdog_task.cancel()
+			try:
+				await self.device_server_watchdog_task
 			except asyncio.CancelledError:
 				pass
 		if self.client:
@@ -254,7 +266,27 @@ class UFORuntime:
 			if self._port_open():
 				return
 			await asyncio.sleep(0.25)
-		raise RuntimeError("UFO device server did not become ready")
+			raise RuntimeError("UFO device server did not become ready")
+
+	async def _watch_device_server(self) -> None:
+		upstream_url = (
+			f"ws://{self.settings.device_server_host}:{self.settings.device_server_port}/ws"
+			f"?token={quote(self.settings.device_server_api_key)}"
+		)
+		await asyncio.sleep(15)
+		while True:
+			try:
+				connection = await websockets.connect(
+					upstream_url,
+					open_timeout=10,
+					close_timeout=1,
+				)
+				await connection.close()
+			except asyncio.CancelledError:
+				raise
+			except (TimeoutError, OSError, websockets.WebSocketException):
+				os._exit(75)
+			await asyncio.sleep(30)
 
 	async def restart_device_server(
 		self, failed_process: asyncio.subprocess.Process | None = None
