@@ -72,6 +72,7 @@ def health() -> dict:
 		"model": settings.qwen_model,
 		"devices_configured": len(device_store.active()),
 		"devices_online": sum(item["status"] == "online" for item in device_store.active()),
+		"device_server_watchdog_checks": runtime.device_server_watchdog_checks,
 	}
 
 

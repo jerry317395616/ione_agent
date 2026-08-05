@@ -176,6 +176,7 @@ class UFORuntime:
 		self.current_run_id: str | None = None
 		self.worker_task: asyncio.Task | None = None
 		self.device_server_watchdog_task: asyncio.Task | None = None
+		self.device_server_watchdog_checks = 0
 		self.device_server_process: asyncio.subprocess.Process | None = None
 		self.device_server_lock = asyncio.Lock()
 		self.devices_dirty = False
@@ -285,8 +286,9 @@ class UFORuntime:
 				raise
 			except (TimeoutError, OSError, websockets.WebSocketException):
 				os._exit(75)
+			self.device_server_watchdog_checks += 1
 			try:
-				await connection.close()
+				await asyncio.wait_for(connection.close(), timeout=2)
 			except (TimeoutError, OSError, websockets.WebSocketException):
 				pass
 			await asyncio.sleep(30)
