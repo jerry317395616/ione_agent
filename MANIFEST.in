@@ -9,5 +9,6 @@ recursive-include ione_agent *.js
 recursive-include ione_agent *.json
 recursive-include ione_agent *.md
 recursive-include ione_agent *.py
+recursive-include ione_agent *.ps1
+recursive-include ione_agent *.cmd
 recursive-include ione_agent *.svg
-

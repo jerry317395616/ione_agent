@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+import websockets
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 
-from app.models import CreateRunRequest
+from app.device_store import DeviceStore
+from app.models import CreateRunRequest, RegisterDeviceRequest
 from app.runtime import UFORuntime, git_commit
 from app.settings import Settings
 from app.store import RunStore
@@ -13,7 +17,8 @@ from app.store import RunStore
 settings = Settings.from_environment()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 store = RunStore(settings.data_dir / "runs.sqlite3")
-runtime = UFORuntime(settings, store)
+device_store = DeviceStore(settings.data_dir / "devices.sqlite3")
+runtime = UFORuntime(settings, store, device_store)
 
 
 def authorize(authorization: str | None = Header(default=None)) -> None:
@@ -45,8 +50,84 @@ def health() -> dict:
 		"ufo_branch": "main",
 		"ufo_commit": git_commit(settings.ufo_root),
 		"model": settings.qwen_model,
-		"devices_configured": len(settings.devices.get("devices", [])),
+		"devices_configured": len(device_store.active()),
+		"devices_online": sum(item["status"] == "online" for item in device_store.active()),
 	}
+
+
+def public_device(device: dict) -> dict:
+	return {key: value for key, value in device.items() if key != "token_hash"}
+
+
+@app.post("/v1/devices", dependencies=[Depends(authorize)])
+async def register_device(request: RegisterDeviceRequest) -> dict:
+	device = device_store.register(request.model_dump())
+	await runtime.refresh_devices()
+	separator = "&" if "?" in settings.device_public_ws_url else "?"
+	return {
+		**public_device(device),
+		"connection_url": (
+			f"{settings.device_public_ws_url}{separator}device_id={quote(request.device_id)}"
+			f"&token={quote(request.device_token)}"
+		),
+	}
+
+
+@app.get("/v1/devices", dependencies=[Depends(authorize)])
+def list_devices() -> list[dict]:
+	return [public_device(item) for item in device_store.list()]
+
+
+@app.delete("/v1/devices/{device_id}", dependencies=[Depends(authorize)])
+async def revoke_device(device_id: str) -> dict:
+	device = device_store.revoke(device_id)
+	if not device:
+		raise HTTPException(status_code=404, detail="Device not found")
+	await runtime.refresh_devices()
+	return public_device(device)
+
+
+@app.websocket("/device/ws")
+async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> None:
+	if not device_store.authenticate(device_id, token):
+		await websocket.close(code=1008, reason="Invalid or revoked device token")
+		return
+	await websocket.accept()
+	upstream_url = (
+		f"ws://{settings.device_server_host}:{settings.device_server_port}/ws"
+		f"?token={quote(settings.device_server_api_key)}"
+	)
+	try:
+		async with websockets.connect(upstream_url, max_size=None) as upstream:
+			device_store.set_status(device_id, "online")
+
+			async def to_upstream() -> None:
+				while True:
+					message = await websocket.receive()
+					if message["type"] == "websocket.disconnect":
+						break
+					if message.get("text") is not None:
+						await upstream.send(message["text"])
+					elif message.get("bytes") is not None:
+						await upstream.send(message["bytes"])
+
+			async def to_device() -> None:
+				async for message in upstream:
+					if isinstance(message, bytes):
+						await websocket.send_bytes(message)
+					else:
+						await websocket.send_text(message)
+
+			tasks = [asyncio.create_task(to_upstream()), asyncio.create_task(to_device())]
+			done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+			for task in pending:
+				task.cancel()
+			for task in done:
+				task.result()
+	except (WebSocketDisconnect, websockets.WebSocketException):
+		pass
+	finally:
+		device_store.set_status(device_id, "offline")
 
 
 @app.post("/v1/runs", dependencies=[Depends(authorize)])

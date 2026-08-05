@@ -9,6 +9,7 @@ QWEN_MODEL="${QWEN_MODEL:-qwen3.6-35b-a3b-fp8}"
 IONE_GATEWAY_BIND="${IONE_GATEWAY_BIND:-10.144.133.1}"
 
 gateway_token="$(openssl rand -hex 32)"
+device_server_key="$(openssl rand -hex 32)"
 qwen_key="$(
 	docker inspect "${QWEN_CONTAINER}" \
 		| python3 -c 'import json,sys; print(next(x.split("=",1)[1] for x in json.load(sys.stdin)[0]["Config"]["Env"] if x.startswith("VLLM_API_KEY=")))'
@@ -18,6 +19,10 @@ test -n "${qwen_key}"
 umask 077
 printf '%s\n' \
 	"IONE_GATEWAY_TOKEN=${gateway_token}" \
+	"IONE_DEVICE_SERVER_API_KEY=${device_server_key}" \
+	"IONE_DEVICE_PUBLIC_WS_URL=${IONE_DEVICE_PUBLIC_WS_URL:-wss://agent-device.myyr.top/device/ws}" \
+	"IONE_DEVICE_SERVER_HOST=127.0.0.1" \
+	"IONE_DEVICE_SERVER_PORT=5000" \
 	"IONE_GATEWAY_BIND=${IONE_GATEWAY_BIND}" \
 	"IONE_GATEWAY_DOCKERFILE=${IONE_GATEWAY_DOCKERFILE:-Dockerfile}" \
 	"QWEN_API_BASE=${QWEN_API_BASE}" \

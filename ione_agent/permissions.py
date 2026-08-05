@@ -38,6 +38,14 @@ def run_query(user: str | None = None) -> str:
 	return _owner_query(user)
 
 
+def device_query(user: str | None = None) -> str:
+	return _owner_query(user)
+
+
+def pairing_query(user: str | None = None) -> str:
+	return _owner_query(user)
+
+
 def _document_permission(doc, user: str | None = None) -> bool:
 	user = _user(user)
 	return user == "Administrator" or _is_manager(user) or doc.user == user
@@ -52,4 +60,12 @@ def message_permission(doc, user: str | None = None, **kwargs) -> bool:
 
 
 def run_permission(doc, user: str | None = None, **kwargs) -> bool:
+	return _document_permission(doc, user)
+
+
+def device_permission(doc, user: str | None = None, **kwargs) -> bool:
+	return _document_permission(doc, user)
+
+
+def pairing_permission(doc, user: str | None = None, **kwargs) -> bool:
 	return _document_permission(doc, user)

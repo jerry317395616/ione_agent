@@ -16,6 +16,10 @@ def _required(name: str) -> str:
 @dataclass(frozen=True)
 class Settings:
 	gateway_token: str
+	device_server_api_key: str
+	device_public_ws_url: str
+	device_server_host: str
+	device_server_port: int
 	qwen_api_base: str
 	qwen_api_key: str
 	qwen_model: str
@@ -36,6 +40,10 @@ class Settings:
 			raise RuntimeError("UFO_DEVICES_JSON must be an object with a devices array")
 		return cls(
 			gateway_token=_required("IONE_GATEWAY_TOKEN"),
+			device_server_api_key=_required("IONE_DEVICE_SERVER_API_KEY"),
+			device_public_ws_url=_required("IONE_DEVICE_PUBLIC_WS_URL"),
+			device_server_host=os.getenv("IONE_DEVICE_SERVER_HOST", "127.0.0.1").strip(),
+			device_server_port=max(1024, min(65535, int(os.getenv("IONE_DEVICE_SERVER_PORT", "5000")))),
 			qwen_api_base=_required("QWEN_API_BASE").rstrip("/"),
 			qwen_api_key=_required("QWEN_API_KEY"),
 			qwen_model=os.getenv("QWEN_MODEL", "qwen3.6-35b-a3b-fp8").strip(),
@@ -49,3 +57,10 @@ class Settings:
 	@property
 	def openai_base_url(self) -> str:
 		return self.qwen_api_base.removesuffix("/chat/completions").rstrip("/")
+
+	@property
+	def internal_device_ws_url(self) -> str:
+		return (
+			f"ws://{self.device_server_host}:{self.device_server_port}/ws"
+			f"?token={self.device_server_api_key}"
+		)

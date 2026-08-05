@@ -31,7 +31,7 @@ class GatewayClient:
 	def __init__(self, config: GatewayConfig | None = None) -> None:
 		self.config = config or get_gateway_config()
 
-	def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
+	def _request(self, method: str, path: str, **kwargs) -> Any:
 		headers = dict(kwargs.pop("headers", {}))
 		headers["Authorization"] = f"Bearer {self.config.token}"
 		headers["Accept"] = "application/json"
@@ -67,3 +67,12 @@ class GatewayClient:
 
 	def stop_run(self, run_id: str) -> dict[str, Any]:
 		return self._request("POST", f"/v1/runs/{run_id}/stop")
+
+	def register_device(self, payload: dict[str, Any]) -> dict[str, Any]:
+		return self._request("POST", "/v1/devices", json=payload)
+
+	def list_devices(self) -> list[dict[str, Any]]:
+		return self._request("GET", "/v1/devices")
+
+	def revoke_device(self, device_id: str) -> dict[str, Any]:
+		return self._request("DELETE", f"/v1/devices/{device_id}")

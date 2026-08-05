@@ -6,6 +6,8 @@
     currentSession: null,
     currentRun: null,
     pollTimer: null,
+    devicePollTimer: null,
+    devices: [],
     busy: false,
   };
 
@@ -31,6 +33,34 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.exception) {
       let message = payload.message || "请求失败，请稍后重试。";
+      if (payload._server_messages) {
+        try {
+          const messages = JSON.parse(payload._server_messages).map((item) => JSON.parse(item).message);
+          message = messages.filter(Boolean).join("；") || message;
+        } catch (_) { /* Keep the fallback message. */ }
+      }
+      throw new Error(message);
+    }
+    return payload.message;
+  }
+
+  async function deviceCall(method, args = {}) {
+    const body = new URLSearchParams();
+    Object.entries(args).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) body.append(key, String(value));
+    });
+    const response = await fetch(`/api/method/ione_agent.device_api.${method}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Frappe-CSRF-Token": csrfToken,
+      },
+      body,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.exception) {
+      let message = payload.message || "设备请求失败，请稍后重试。";
       if (payload._server_messages) {
         try {
           const messages = JSON.parse(payload._server_messages).map((item) => JSON.parse(item).message);
@@ -130,6 +160,90 @@
     const healthy = gateway?.status === "healthy";
     els.gatewayIndicator.dataset.status = healthy ? "healthy" : "unavailable";
     els.gatewayLabel.textContent = healthy ? `${gateway.runtime || "UFO³"} · ${gateway.model || "Qwen"}` : "Agent 服务不可用";
+    els.deviceStatusDot.classList.toggle("online", Number(gateway?.devices_online || 0) > 0);
+  }
+
+  function deviceStatusLabel(status) {
+    return { Online: "在线", Offline: "离线", Revoked: "已撤销" }[status] || status || "离线";
+  }
+
+  function renderDevices() {
+    els.deviceList.replaceChildren();
+    const onlineCount = state.devices.filter((device) => device.status === "Online").length;
+    els.deviceCount.textContent = `${state.devices.length} 台设备 · ${onlineCount} 台在线`;
+    els.deviceStatusDot.classList.toggle("online", onlineCount > 0);
+    if (!state.devices.length) {
+      const empty = document.createElement("div");
+      empty.className = "device-list-empty";
+      empty.textContent = "还没有注册设备。请生成安装包并在需要使用的电脑上运行。";
+      els.deviceList.appendChild(empty);
+      return;
+    }
+    state.devices.forEach((device) => {
+      const row = document.createElement("div");
+      row.className = "device-row";
+      const dot = document.createElement("span");
+      dot.className = `device-row-dot ${String(device.status || "").toLowerCase()}`;
+      const copy = document.createElement("div");
+      copy.className = "device-row-copy";
+      const name = document.createElement("strong");
+      name.textContent = device.device_name || device.device_id;
+      const meta = document.createElement("span");
+      meta.textContent = `${deviceStatusLabel(device.status)} · ${device.platform || "Windows"}`;
+      copy.append(name, meta);
+      const revoke = document.createElement("button");
+      revoke.type = "button";
+      revoke.className = "revoke-device";
+      revoke.textContent = device.status === "Revoked" ? "已撤销" : "撤销";
+      revoke.disabled = device.status === "Revoked";
+      revoke.addEventListener("click", () => revokeDevice(device));
+      row.append(dot, copy, revoke);
+      els.deviceList.appendChild(row);
+    });
+  }
+
+  async function loadDevices() {
+    state.devices = await deviceCall("get_devices") || [];
+    renderDevices();
+  }
+
+  async function createPairing() {
+    els.createPairing.disabled = true;
+    try {
+      const pairing = await deviceCall("create_pairing");
+      els.downloadInstaller.href = pairing.download_url;
+      els.pairingExpiry.textContent = `安装包将在 ${new Date(String(pairing.expires_at).replace(" ", "T")).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 前有效。`;
+      els.pairingPanel.hidden = false;
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      els.createPairing.disabled = false;
+    }
+  }
+
+  async function revokeDevice(device) {
+    if (!window.confirm(`确认撤销设备“${device.device_name || device.device_id}”吗？`)) return;
+    try {
+      await deviceCall("revoke_device", { device_id: device.device_id });
+      await loadDevices();
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+
+  async function openDeviceModal() {
+    els.deviceModal.hidden = false;
+    document.body.classList.add("modal-open");
+    try { await loadDevices(); } catch (error) { showToast(error.message); }
+    window.clearInterval(state.devicePollTimer);
+    state.devicePollTimer = window.setInterval(() => loadDevices().catch(() => {}), 4000);
+  }
+
+  function closeDeviceModal() {
+    els.deviceModal.hidden = true;
+    document.body.classList.remove("modal-open");
+    window.clearInterval(state.devicePollTimer);
+    state.devicePollTimer = null;
   }
 
   function activeSession() {
@@ -316,7 +430,9 @@
     ["sessionSidebar", "sidebarBackdrop", "sessionList", "newSession", "refreshSessions", "openSidebar", "closeSidebar",
       "conversationTitle", "gatewayIndicator", "gatewayLabel", "messageScroll", "emptyState", "messageList", "runPanel",
       "runStage", "runMeta", "runProgress", "runSpinner", "eventList", "stopRun", "composer", "messageInput",
-      "sendMessage", "toastRegion"].forEach((name) => {
+      "sendMessage", "toastRegion", "deviceButton", "deviceStatusDot", "deviceModal", "deviceModalBackdrop",
+      "closeDeviceModal", "createPairing", "pairingPanel", "downloadInstaller", "pairingExpiry", "refreshDevices",
+      "deviceList", "deviceCount"].forEach((name) => {
       const id = name.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
       els[name] = byId(id);
     });
@@ -329,6 +445,11 @@
     els.closeSidebar.addEventListener("click", closeSidebar);
     els.sidebarBackdrop.addEventListener("click", closeSidebar);
     els.stopRun.addEventListener("click", stopCurrentRun);
+    els.deviceButton.addEventListener("click", openDeviceModal);
+    els.closeDeviceModal.addEventListener("click", closeDeviceModal);
+    els.deviceModalBackdrop.addEventListener("click", closeDeviceModal);
+    els.createPairing.addEventListener("click", createPairing);
+    els.refreshDevices.addEventListener("click", () => loadDevices().catch((error) => showToast(error.message)));
     els.messageInput.addEventListener("input", resizeInput);
     els.messageInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -343,6 +464,9 @@
         resizeInput();
         els.messageInput.focus();
       });
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !els.deviceModal.hidden) closeDeviceModal();
     });
   }
 

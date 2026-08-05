@@ -14,7 +14,13 @@ def _schemas():
 
 def test_expected_doctypes_exist():
 	names = {schema["name"] for _, schema in _schemas()}
-	assert names == {"I-ONE Agent Session", "I-ONE Agent Message", "I-ONE Agent Run"}
+	assert names == {
+		"I-ONE Agent Session",
+		"I-ONE Agent Message",
+		"I-ONE Agent Run",
+		"I-ONE Agent Device",
+		"I-ONE Agent Pairing",
+	}
 
 
 def test_doctype_fields_are_unique_and_ordered():

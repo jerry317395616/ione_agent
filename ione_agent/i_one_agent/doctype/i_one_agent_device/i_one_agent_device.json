@@ -1,0 +1,35 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:device_id",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["device_name", "device_id", "user", "status", "column_break", "platform", "client_version", "capabilities", "time_section", "paired_at", "last_seen_at", "revoked_at"],
+ "fields": [
+  {"fieldname": "device_name", "fieldtype": "Data", "label": "设备名称", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "device_id", "fieldtype": "Data", "label": "设备标识", "reqd": 1, "unique": 1, "read_only": 1},
+  {"fieldname": "user", "fieldtype": "Link", "label": "所属用户", "options": "User", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "status", "fieldtype": "Select", "label": "状态", "options": "Offline\nOnline\nRevoked", "default": "Offline", "read_only": 1, "in_list_view": 1},
+  {"fieldname": "column_break", "fieldtype": "Column Break"},
+  {"fieldname": "platform", "fieldtype": "Data", "label": "操作系统", "default": "Windows", "read_only": 1},
+  {"fieldname": "client_version", "fieldtype": "Data", "label": "客户端版本", "read_only": 1},
+  {"fieldname": "capabilities", "fieldtype": "Code", "label": "设备能力", "options": "JSON", "read_only": 1},
+  {"fieldname": "time_section", "fieldtype": "Section Break", "label": "连接信息"},
+  {"fieldname": "paired_at", "fieldtype": "Datetime", "label": "配对时间", "read_only": 1},
+  {"fieldname": "last_seen_at", "fieldtype": "Datetime", "label": "最后在线时间", "read_only": 1},
+  {"fieldname": "revoked_at", "fieldtype": "Datetime", "label": "撤销时间", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 0,
+ "module": "I-ONE Agent",
+ "name": "I-ONE Agent Device",
+ "naming_rule": "By fieldname",
+ "permissions": [
+  {"role": "I-ONE Agent User", "read": 1},
+  {"role": "I-ONE Agent Manager", "read": 1, "delete": 1, "report": 1, "export": 1},
+  {"role": "System Manager", "read": 1, "delete": 1, "report": 1, "export": 1}
+ ],
+ "search_fields": "device_name,device_id,user",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -41,6 +41,10 @@ def test_extract_answer_can_use_agent_event():
 def test_openai_base_url_does_not_duplicate_chat_completions(tmp_path):
 	settings = Settings(
 		gateway_token="secret",
+		device_server_api_key="device-secret",
+		device_public_ws_url="wss://agent-device.example.com/device/ws",
+		device_server_host="127.0.0.1",
+		device_server_port=5000,
 		qwen_api_base="http://qwen:1234/v1/chat/completions",
 		qwen_api_key="key",
 		qwen_model="qwen",

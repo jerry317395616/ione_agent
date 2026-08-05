@@ -52,6 +52,10 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span id="gateway-label">正在检查服务</span>
         </div>
+        <button id="device-button" class="device-button" type="button" title="管理执行设备">
+          <span id="device-status-dot" class="device-status-dot" aria-hidden="true"></span>
+          <span>连接电脑</span>
+        </button>
       </header>
 
       <section id="message-scroll" class="message-scroll" aria-live="polite">
@@ -102,8 +106,44 @@
     </main>
   </div>
 
+  <div id="device-modal" class="modal-shell" hidden>
+    <button id="device-modal-backdrop" class="modal-backdrop" type="button" aria-label="关闭设备管理"></button>
+    <section class="device-dialog" role="dialog" aria-modal="true" aria-labelledby="device-dialog-title">
+      <header class="device-dialog-header">
+        <div>
+          <h2 id="device-dialog-title">执行设备</h2>
+          <p>连接当前 Windows 电脑后，Agent 才能操作 Excel、Word 和桌面应用。</p>
+        </div>
+        <button id="close-device-modal" class="icon-button" type="button" aria-label="关闭" title="关闭">×</button>
+      </header>
+      <div class="device-dialog-body">
+        <section class="device-install-section">
+          <div class="section-heading">
+            <div><strong>连接这台电脑</strong><span>首次使用需要运行一次安装程序</span></div>
+            <button id="create-pairing" class="primary-command" type="button">生成安装包</button>
+          </div>
+          <div id="pairing-panel" class="pairing-panel" hidden>
+            <ol>
+              <li>下载并解压安装包。</li>
+              <li>双击 <strong>install.cmd</strong>，按 Windows 提示确认。</li>
+              <li>安装完成后返回这里，设备会自动显示为“在线”。</li>
+            </ol>
+            <a id="download-installer" class="download-command" href="#">下载 Windows 安装包</a>
+            <span id="pairing-expiry" class="pairing-expiry"></span>
+          </div>
+        </section>
+        <section class="device-list-section">
+          <div class="section-heading compact">
+            <div><strong>已注册设备</strong><span id="device-count">0 台设备</span></div>
+            <button id="refresh-devices" class="icon-button" type="button" aria-label="刷新设备" title="刷新">↻</button>
+          </div>
+          <div id="device-list" class="device-list"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+
   <div id="toast-region" class="toast-region" aria-live="assertive"></div>
   <script src="/assets/ione_agent/js/agent.js" defer></script>
 </body>
 </html>
-

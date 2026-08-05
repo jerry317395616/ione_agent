@@ -26,10 +26,14 @@ permission_query_conditions = {
 	"I-ONE Agent Session": "ione_agent.permissions.session_query",
 	"I-ONE Agent Message": "ione_agent.permissions.message_query",
 	"I-ONE Agent Run": "ione_agent.permissions.run_query",
+	"I-ONE Agent Device": "ione_agent.permissions.device_query",
+	"I-ONE Agent Pairing": "ione_agent.permissions.pairing_query",
 }
 
 has_permission = {
 	"I-ONE Agent Session": "ione_agent.permissions.session_permission",
 	"I-ONE Agent Message": "ione_agent.permissions.message_permission",
 	"I-ONE Agent Run": "ione_agent.permissions.run_permission",
+	"I-ONE Agent Device": "ione_agent.permissions.device_permission",
+	"I-ONE Agent Pairing": "ione_agent.permissions.pairing_permission",
 }
