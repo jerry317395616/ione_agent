@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12
+
+- Allow long blocking desktop actions without triggering Uvicorn's short WebSocket ping timeout.
+
 ## 0.2.11
 
 - Send UFO desktop application heartbeats every 20 seconds through Cloudflare Tunnel.

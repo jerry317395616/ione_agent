@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 GATEWAY_ROOT = Path(__file__).resolve().parents[1]
+OFFLINE_DOCKERFILE = GATEWAY_ROOT / "Dockerfile.offline"
 sys.path.insert(0, str(GATEWAY_ROOT))
 
 from app.runtime import (  # noqa: E402
@@ -171,3 +172,8 @@ def test_device_heartbeat_keeps_device_role():
 def test_public_device_keepalive_is_valid_aip_heartbeat():
 	assert DEVICE_KEEPALIVE_INTERVAL_SECONDS < 60
 	assert device_heartbeat_message() == '{"type":"heartbeat","status":"ok"}'
+
+
+def test_gateway_allows_blocking_desktop_steps_to_answer_websocket_pings():
+	dockerfile = OFFLINE_DOCKERFILE.read_text(encoding="utf-8")
+	assert '"--ws-ping-timeout", "600"' in dockerfile
