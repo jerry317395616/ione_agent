@@ -17,7 +17,7 @@ The HTTP run APIs must remain protected by `IONE_GATEWAY_TOKEN`. When Windows de
 
 ## Windows device pairing
 
-The Frappe `/agent` page creates a short-lived installer. The installer pairs once with Frappe, stores its connection URL using Windows DPAPI, installs the official UFO `main` branch in a Python 3.11 environment and starts the client at user logon. Desktop automation therefore runs in the interactive Windows session rather than Session 0.
+The Frappe `/agent` page creates a short-lived installer. The installer pairs once with Frappe, stores its connection URL using Windows DPAPI, installs the official UFO `main` branch in a Python 3.10 environment and starts the client at user logon. Desktop automation therefore runs in the interactive Windows session rather than Session 0.
 
 Route the hostname in `IONE_DEVICE_PUBLIC_WS_URL` to gateway port `8098` through your TLS reverse proxy or Cloudflare Tunnel. The Windows client makes an outbound-only `wss://` connection and does not require an inbound firewall rule.
 

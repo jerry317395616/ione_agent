@@ -18,7 +18,7 @@ Open `/agent`, select **连接电脑**, and generate the short-lived Windows ins
 
 1. Claims the one-time pairing token.
 2. Stores the per-device WebSocket URL with Windows DPAPI.
-3. Installs Python 3.11 and the official Microsoft UFO `main` branch.
+3. Installs Python 3.10 and the official Microsoft UFO `main` branch.
 4. Registers a per-user logon task and starts the interactive desktop client.
 
 The computer makes an outbound-only TLS WebSocket connection. It does not expose a local port. Revoking the device from `/agent` immediately prevents future gateway connections.
