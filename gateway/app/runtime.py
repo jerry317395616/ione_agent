@@ -255,20 +255,29 @@ class UFORuntime:
 			await asyncio.sleep(0.25)
 		raise RuntimeError("UFO device server did not become ready")
 
-	async def restart_device_server(self) -> None:
+	async def restart_device_server(
+		self, failed_process: asyncio.subprocess.Process | None = None
+	) -> None:
 		async with self.device_server_lock:
+			if (
+				failed_process is not None
+				and self.device_server_process is not failed_process
+				and self._port_open()
+			):
+				return
 			if self.device_server_process and self.device_server_process.returncode is None:
-				self.device_server_process.terminate()
+				self.device_server_process.kill()
 				try:
-					await asyncio.wait_for(self.device_server_process.wait(), timeout=8)
+					await asyncio.wait_for(self.device_server_process.wait(), timeout=5)
 				except TimeoutError:
-					self.device_server_process.kill()
-					await self.device_server_process.wait()
+					pass
 			self.device_server_process = None
-			for _ in range(20):
+			for _ in range(50):
 				if not self._port_open():
 					break
 				await asyncio.sleep(0.1)
+			else:
+				raise RuntimeError("UFO device server did not stop")
 			await self._start_device_server()
 
 	def _port_open(self) -> bool:

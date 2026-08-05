@@ -151,6 +151,7 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 	)
 	try:
 		upstream = None
+		failed_process = runtime.device_server_process
 		for attempt in range(2):
 			try:
 				upstream = await websockets.connect(upstream_url, max_size=None, open_timeout=10)
@@ -158,7 +159,7 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 			except (TimeoutError, OSError):
 				if attempt:
 					raise
-				await runtime.restart_device_server()
+				await runtime.restart_device_server(failed_process)
 		if upstream is None:
 			raise RuntimeError("Unable to connect to the UFO device server")
 
@@ -189,7 +190,10 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 			for task in done:
 				task.result()
 		finally:
-			await upstream.close()
+			try:
+				await asyncio.wait_for(upstream.close(), timeout=2)
+			except TimeoutError:
+				pass
 	except (TimeoutError, OSError, WebSocketDisconnect, websockets.WebSocketException):
 		pass
 	finally:
