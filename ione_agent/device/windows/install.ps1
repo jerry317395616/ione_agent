@@ -19,7 +19,8 @@ function Protect-DeviceConfig([hashtable]$Config) {
     $json = $Config | ConvertTo-Json -Compress
     $secure = ConvertTo-SecureString $json -AsPlainText -Force
     $secure | ConvertFrom-SecureString | Set-Content -Path $ConfigPath -Encoding UTF8
-    & icacls.exe $ConfigPath /inheritance:r /grant:r "$env:USERNAME:(R,W)" | Out-Null
+    & icacls.exe $ConfigPath /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Unable to secure the device configuration." }
 }
 
 function Get-UvPath {
@@ -33,8 +34,8 @@ function Get-UvPath {
         if (Test-Path $candidate) { return $candidate }
     }
     Write-Host "Installing the Python environment manager..."
-    $installer = (Invoke-WebRequest -UseBasicParsing "https://astral.sh/uv/install.ps1").Content
-    & ([scriptblock]::Create($installer))
+    $installer = Invoke-RestMethod "https://astral.sh/uv/install.ps1"
+    Invoke-Expression ([string]$installer)
     foreach ($candidate in $candidates) {
         if (Test-Path $candidate) { return $candidate }
     }
@@ -47,7 +48,7 @@ if (-not (Test-Path $ConfigPath)) {
         pairing_token = $PairingToken
         device_id = $DeviceId
         device_name = $env:COMPUTERNAME
-        client_version = "0.1.0"
+        client_version = "0.2.1"
     }
     Write-Host "Pairing this computer with I-ONE Agent..."
     $response = Invoke-RestMethod `

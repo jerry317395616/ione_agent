@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Fix Windows PowerShell 5 compatibility when downloading the uv installer.
+- Fix device configuration ACL assignment on Windows.
+
 ## 0.2.0
 
 - Added short-lived Windows device pairing and per-device token revocation.

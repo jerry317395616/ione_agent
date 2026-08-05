@@ -5,6 +5,7 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 DOCTYPE_ROOT = APP_ROOT / "i_one_agent" / "doctype"
+WINDOWS_INSTALLER = APP_ROOT / "device" / "windows" / "install.ps1"
 
 
 def _schemas():
@@ -36,3 +37,11 @@ def test_user_scope_is_present_on_all_persistent_records():
 		fields = {field["fieldname"]: field for field in schema["fields"]}
 		assert fields["user"]["options"] == "User", path
 		assert fields["user"]["reqd"] == 1, path
+
+
+def test_windows_installer_uses_text_download_and_explicit_acl_identity():
+	installer = WINDOWS_INSTALLER.read_text(encoding="utf-8")
+	assert 'Invoke-RestMethod "https://astral.sh/uv/install.ps1"' in installer
+	assert 'Invoke-Expression ([string]$installer)' in installer
+	assert '"$($env:USERNAME):(R,W)"' in installer
+	assert 'client_version = "0.2.1"' in installer
