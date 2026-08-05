@@ -51,3 +51,14 @@ def test_register_rotates_token_and_reactivates_device(tmp_path):
 	assert not store.authenticate("windows-test-device", "a" * 48)
 	assert store.authenticate("windows-test-device", "b" * 48)
 	assert store.get("windows-test-device")["revoked"] is False
+
+
+def test_restart_marks_active_devices_offline(tmp_path):
+	database = tmp_path / "devices.sqlite3"
+	store = DeviceStore(database)
+	store.register(device_payload())
+	store.set_status("windows-test-device", "online")
+
+	restarted_store = DeviceStore(database)
+
+	assert restarted_store.get("windows-test-device")["status"] == "offline"

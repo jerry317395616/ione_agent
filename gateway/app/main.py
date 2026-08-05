@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import os
 from contextlib import asynccontextmanager
 from typing import Annotated
 from urllib.parse import quote
@@ -24,6 +25,10 @@ settings.data_dir.mkdir(parents=True, exist_ok=True)
 store = RunStore(settings.data_dir / "runs.sqlite3")
 device_store = DeviceStore(settings.data_dir / "devices.sqlite3")
 runtime = UFORuntime(settings, store, device_store)
+
+
+def schedule_gateway_restart() -> None:
+	asyncio.get_running_loop().call_later(0.25, os._exit, 75)
 
 
 def authorize(authorization: str | None = Header(default=None)) -> None:
@@ -158,8 +163,13 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 				break
 			except (TimeoutError, OSError):
 				if attempt:
+					schedule_gateway_restart()
 					raise
-				await runtime.restart_device_server(failed_process)
+				try:
+					await runtime.restart_device_server(failed_process)
+				except RuntimeError:
+					schedule_gateway_restart()
+					raise
 		if upstream is None:
 			raise RuntimeError("Unable to connect to the UFO device server")
 

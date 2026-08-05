@@ -42,6 +42,9 @@ class DeviceStore:
 				)
 				"""
 			)
+			self.connection.execute(
+				"UPDATE devices SET status = 'offline' WHERE revoked = 0"
+			)
 
 	def register(self, payload: dict[str, Any]) -> dict[str, Any]:
 		now = utc_now()
