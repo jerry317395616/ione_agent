@@ -168,6 +168,81 @@ function Set-UfoWindowFocusFallback {
     [IO.File]::WriteAllText($uiServer, $source, (New-Object Text.UTF8Encoding($false)))
 }
 
+function Set-UfoAppResponseCompatibility {
+    $strategyPath = Join-Path $UfoRoot "ufo\agents\processors\strategies\app_agent_processing_strategy.py"
+    if (-not (Test-Path $strategyPath)) {
+        throw "The UFO AppAgent processing strategy was not found."
+    }
+    $source = [IO.File]::ReadAllText($strategyPath)
+    if ($source -notmatch "I-ONE legacy nonvisual response compatibility") {
+        $pattern = '(?m)^            response_dict = agent\.response_to_dict\(response_text\)\r?\n\r?\n            # Create structured response\r?\n            parsed_response = AppAgentResponse\.model_validate\(response_dict\)'
+        $replacement = @'
+            response_dict = agent.response_to_dict(response_text)
+
+            # I-ONE legacy nonvisual response compatibility.
+            normalized = {str(key).lower(): value for key, value in response_dict.items()}
+            if "action" not in normalized and any(
+                key in normalized for key in ("function", "args", "status", "controllabel")
+            ):
+                function = str(normalized.pop("function", "") or "").strip()
+                status = str(normalized.pop("status", "") or "").strip()
+                arguments = normalized.pop("args", {})
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                control_id = str(normalized.pop("controllabel", "") or "").strip()
+                if control_id and "id" not in arguments:
+                    arguments["id"] = control_id
+                normalized.pop("controltext", None)
+                normalized["action"] = (
+                    {"function": function, "arguments": arguments, "status": status}
+                    if function
+                    else []
+                )
+            response_dict = normalized
+
+            # Create structured response
+            parsed_response = AppAgentResponse.model_validate(response_dict)
+'@
+        $updated = [regex]::Replace($source, $pattern, $replacement, 1)
+        if ($updated -eq $source) {
+            throw "The UFO AppAgent response compatibility patch no longer matches main."
+        }
+        $source = $updated
+    }
+    [IO.File]::WriteAllText($strategyPath, $source, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Set-UfoOpenAiLimits {
+    $openAiPath = Join-Path $UfoRoot "ufo\llm\openai.py"
+    if (-not (Test-Path $openAiPath)) {
+        throw "The UFO OpenAI client was not found."
+    }
+    $source = [IO.File]::ReadAllText($openAiPath)
+    $source = $source.Replace('# "max_tokens": max_tokens,', '"max_tokens": max_tokens,')
+    if ($source -notmatch '"enable_thinking": False') {
+        $pattern = '(?m)^                "n": 1,\r?\n                \*\*kwargs,'
+        $replacement = @'
+                "n": 1,
+                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+                **kwargs,
+'@
+        $updated = [regex]::Replace($source, $pattern, $replacement, 1)
+        if ($updated -eq $source) {
+            throw "The UFO Qwen thinking compatibility patch no longer matches main."
+        }
+        $source = $updated
+    }
+    if ($source -notmatch '"max_tokens": max_tokens,') {
+        throw "The UFO max_tokens compatibility patch no longer matches main."
+    }
+    [IO.File]::WriteAllText($openAiPath, $source, (New-Object Text.UTF8Encoding($false)))
+
+    $systemPath = Join-Path $UfoRoot "config\ufo\system.yaml"
+    $system = [IO.File]::ReadAllText($systemPath)
+    $system = [regex]::Replace($system, '(?m)^MAX_TOKENS:\s*\d+', 'MAX_TOKENS: 800', 1)
+    [IO.File]::WriteAllText($systemPath, $system, (New-Object Text.UTF8Encoding($false)))
+}
+
 function Get-UvPath {
     $command = Get-Command uv.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -193,7 +268,7 @@ if (-not (Test-Path $ConfigPath)) {
         pairing_token = $PairingToken
         device_id = $DeviceId
         device_name = $env:COMPUTERNAME
-        client_version = "0.2.13"
+        client_version = "0.2.14"
     }
     Write-Host "Pairing this computer with I-ONE Agent..."
     $response = Invoke-RestMethod `
@@ -225,13 +300,15 @@ if (-not (Test-Path (Join-Path $UfoRoot ".git"))) {
     if ($LASTEXITCODE -ne 0) { throw "Unable to clone Microsoft UFO." }
 } else {
     Write-Host "Updating Microsoft UFO main branch..."
-    & $Git -C $UfoRoot checkout -- ufo/client/websocket.py ufo/client/mcp/local_servers/ui_mcp_server.py
+    & $Git -C $UfoRoot checkout -- ufo/client/websocket.py ufo/client/mcp/local_servers/ui_mcp_server.py ufo/agents/processors/strategies/app_agent_processing_strategy.py ufo/llm/openai.py config/ufo/system.yaml
     if ($LASTEXITCODE -ne 0) { throw "Unable to prepare UFO for update." }
     & $Git -C $UfoRoot pull --ff-only origin main
     if ($LASTEXITCODE -ne 0) { throw "Unable to update Microsoft UFO." }
 }
 Set-UfoClientHeartbeat
 Set-UfoWindowFocusFallback
+Set-UfoAppResponseCompatibility
+Set-UfoOpenAiLimits
 
 $DeviceConfig = Read-DeviceConfig
 if (-not $DeviceConfig.model_api_base -or -not $DeviceConfig.model) {
