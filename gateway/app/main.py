@@ -9,8 +9,8 @@ from urllib.parse import quote
 import httpx
 import websockets
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.background import BackgroundTask
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from app.device_store import DeviceStore
 from app.models import CreateRunRequest, RegisterDeviceRequest
