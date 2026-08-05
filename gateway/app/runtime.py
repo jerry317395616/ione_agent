@@ -24,6 +24,8 @@ WINDOWS_EXECUTION_GUIDANCE = (
 	"Never use run_shell for shell scripts, redirection, cmd.exe, or PowerShell. "
 	"Open the target application directly (for example excel.exe, winword.exe, or notepad.exe), "
 	"then complete the task through UI automation. Include this rule in every Windows task description and tips. "
+	"Do not add repeated remediation tasks for the same failure. After two equivalent attempts, return a concise "
+	"failure result with the actionable cause. "
 	"The final user-facing result must be concise Simplified Chinese. Never return raw JSON, internal task "
 	"objects, constellation data, chain-of-thought, or debug output."
 )
@@ -68,6 +70,54 @@ def patch_constellation_heartbeat() -> None:
 
 	send_heartbeat._ione_constellation_compatible = True
 	HeartbeatProtocol.send_heartbeat = send_heartbeat
+
+
+def normalize_app_response(response: dict[str, Any]) -> dict[str, Any]:
+	"""Normalize UFO's legacy non-visual response shape to its current schema."""
+	if not isinstance(response, dict):
+		return response
+	normalized = {str(key).lower(): value for key, value in response.items()}
+	if "action" not in normalized and any(
+		key in normalized for key in ("function", "args", "status", "controllabel")
+	):
+		function = str(normalized.pop("function", "") or "").strip()
+		status = str(normalized.pop("status", "") or "").strip()
+		arguments = normalized.pop("args", {})
+		if not isinstance(arguments, dict):
+			arguments = {}
+		control_id = str(normalized.pop("controllabel", "") or "").strip()
+		if control_id and "id" not in arguments:
+			arguments["id"] = control_id
+		normalized.pop("controltext", None)
+		normalized["action"] = (
+			{"function": function, "arguments": arguments, "status": status}
+			if function
+			else []
+		)
+	return normalized
+
+
+def patch_nonvisual_app_response() -> None:
+	"""Accept the legacy field names emitted by UFO's non-visual prompt."""
+	from ufo.agents.processors.schemas.response_schema import AppAgentResponse
+	from ufo.agents.processors.strategies.app_agent_processing_strategy import (
+		AppLLMInteractionStrategy,
+	)
+
+	if getattr(AppLLMInteractionStrategy._parse_app_response, "_ione_nonvisual_compatible", False):
+		return
+
+	def parse_app_response(self, agent, response_text: str):
+		try:
+			response_dict = normalize_app_response(agent.response_to_dict(response_text))
+			parsed_response = AppAgentResponse.model_validate(response_dict)
+			agent.print_response(parsed_response, print_action=False)
+			return parsed_response
+		except Exception as exc:
+			raise Exception(f"Failed to parse app response: {exc}") from exc
+
+	parse_app_response._ione_nonvisual_compatible = True
+	AppLLMInteractionStrategy._parse_app_response = parse_app_response
 
 
 def probe_websocket_server(host: str, port: int, path: str, timeout: float = 5) -> bool:
@@ -127,28 +177,28 @@ def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = Non
 	(config_dir / "agent.yaml").write_text(
 		yaml.safe_dump(agent_config, allow_unicode=True, sort_keys=False), encoding="utf-8"
 	)
+	common_agent = {
+		"VISUAL_MODE": False,
+		"REASONING_MODEL": False,
+		"API_TYPE": "openai",
+		"API_BASE": settings.openai_base_url,
+		"API_KEY": settings.qwen_api_key,
+		"API_MODEL": settings.qwen_model,
+	}
 	ufo_agents = {
 		"HOST_AGENT": {
-			"VISUAL_MODE": False,
-			"REASONING_MODEL": False,
-			"API_TYPE": "openai",
-			"API_BASE": settings.openai_base_url,
-			"API_KEY": settings.qwen_api_key,
-			"API_MODEL": settings.qwen_model,
+			**common_agent,
 			"PROMPT": "ufo/prompts/share/base/host_agent.yaml",
 			"EXAMPLE_PROMPT": "ufo/prompts/examples/{mode}/host_agent_example.yaml",
 		},
 		"APP_AGENT": {
-			"VISUAL_MODE": False,
-			"REASONING_MODEL": False,
-			"API_TYPE": "openai",
-			"API_BASE": settings.openai_base_url,
-			"API_KEY": settings.qwen_api_key,
-			"API_MODEL": settings.qwen_model,
+			**common_agent,
 			"PROMPT": "ufo/prompts/share/base/app_agent.yaml",
 			"EXAMPLE_PROMPT": "ufo/prompts/examples/{mode}/app_agent_example.yaml",
 			"EXAMPLE_PROMPT_AS": "ufo/prompts/examples/{mode}/app_agent_example_as.yaml",
 		},
+		"BACKUP_AGENT": dict(common_agent),
+		"EVALUATION_AGENT": dict(common_agent),
 	}
 	(settings.ufo_root / "config" / "ufo" / "agents.yaml").write_text(
 		yaml.safe_dump(ufo_agents, allow_unicode=True, sort_keys=False), encoding="utf-8"
@@ -517,6 +567,7 @@ class UFORuntime:
 		from galaxy.galaxy_client import GalaxyClient
 
 		patch_constellation_heartbeat()
+		patch_nonvisual_app_response()
 		get_galaxy_config(reload=True)
 		self.client = GalaxyClient(max_rounds=self.settings.max_rounds, log_level="WARNING")
 		await self.client.initialize()

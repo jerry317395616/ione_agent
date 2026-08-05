@@ -15,6 +15,7 @@ from app.runtime import (  # noqa: E402
 	extract_answer,
 	failure_message,
 	heartbeat_client_type,
+	normalize_app_response,
 	probe_websocket_server,
 	result_failed,
 )
@@ -38,6 +39,42 @@ def test_build_prompt_adds_windows_execution_guidance_without_history():
 	prompt = build_prompt("Create a spreadsheet", [])
 	assert WINDOWS_EXECUTION_GUIDANCE in prompt
 	assert prompt.endswith("Create a spreadsheet")
+
+
+def test_legacy_nonvisual_app_response_is_normalized():
+	response = normalize_app_response(
+		{
+			"Observation": "WeChat is already visible",
+			"Thought": "No additional action is required",
+			"Function": "",
+			"Args": {},
+			"Status": "FINISH",
+			"Plan": [],
+			"Comment": "微信已打开。",
+		}
+	)
+	assert response["observation"] == "WeChat is already visible"
+	assert response["thought"] == "No additional action is required"
+	assert response["action"] == []
+	assert response["comment"] == "微信已打开。"
+
+
+def test_legacy_nonvisual_action_includes_control_id():
+	response = normalize_app_response(
+		{
+			"Observation": "Start menu is open",
+			"Thought": "Click WeChat",
+			"Function": "click_input",
+			"Args": {"button": "left"},
+			"Status": "CONTINUE",
+			"ControlLabel": "12",
+		}
+	)
+	assert response["action"] == {
+		"function": "click_input",
+		"arguments": {"button": "left", "id": "12"},
+		"status": "CONTINUE",
+	}
 
 
 def test_extract_answer_prefers_named_final_answer():

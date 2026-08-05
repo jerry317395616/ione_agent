@@ -108,11 +108,9 @@ function Set-UfoWindowFocusFallback {
         throw "The UFO UI server was not found."
     }
     $source = [IO.File]::ReadAllText($uiServer)
-    if ($source -match "except Exception as focus_error:") {
-        return
-    }
-    $pattern = '(?m)^        except Exception as e:\r?\n            raise ToolError\(f"Failed to set focus on window: \{str\(e\)\}"\)'
-    $replacement = @'
+    if ($source -notmatch "except Exception as focus_error:") {
+        $focusPattern = '(?m)^        except Exception as e:\r?\n            raise ToolError\(f"Failed to set focus on window: \{str\(e\)\}"\)'
+        $focusReplacement = @'
         except Exception as focus_error:
             try:
                 import win32con
@@ -127,11 +125,47 @@ function Set-UfoWindowFocusFallback {
                     f"Failed to set focus on window: {focus_error}; fallback failed: {fallback_error}"
                 ) from fallback_error
 '@
-    $updated = [regex]::Replace($source, $pattern, $replacement, 1)
-    if ($updated -eq $source) {
-        throw "The UFO window-focus compatibility patch no longer matches main."
+        $updated = [regex]::Replace($source, $focusPattern, $focusReplacement, 1)
+        if ($updated -eq $source) {
+            throw "The UFO window-focus compatibility patch no longer matches main."
+        }
+        $source = $updated
     }
-    [IO.File]::WriteAllText($uiServer, $updated, (New-Object Text.UTF8Encoding($false)))
+
+    if ($source -notmatch "I-ONE stale-window recovery") {
+        $refreshPattern = '(?m)^        # Set focus on the window$'
+        $refreshReplacement = @'
+        # I-ONE stale-window recovery: UIA wrappers may outlive the app HWND.
+        try:
+            import win32gui
+
+            if not win32gui.IsWindow(window.handle):
+                fresh_windows = ui_state.control_inspector.get_desktop_app_dict(
+                    remove_empty=True
+                )
+                window = next(
+                    (
+                        candidate
+                        for candidate in fresh_windows.values()
+                        if candidate.window_text() == name
+                        and win32gui.IsWindow(candidate.handle)
+                    ),
+                    window,
+                )
+                app_window_dict[id] = window
+                ui_state.last_app_windows = app_window_dict
+        except Exception as refresh_error:
+            logger.warning(f"Unable to refresh stale window '{name}': {refresh_error}")
+
+        # Set focus on the window
+'@
+        $updated = [regex]::Replace($source, $refreshPattern, $refreshReplacement, 1)
+        if ($updated -eq $source) {
+            throw "The UFO stale-window compatibility patch no longer matches main."
+        }
+        $source = $updated
+    }
+    [IO.File]::WriteAllText($uiServer, $source, (New-Object Text.UTF8Encoding($false)))
 }
 
 function Get-UvPath {
