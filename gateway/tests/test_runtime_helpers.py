@@ -6,7 +6,7 @@ from pathlib import Path
 GATEWAY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(GATEWAY_ROOT))
 
-from app.runtime import build_prompt, extract_answer  # noqa: E402
+from app.runtime import WINDOWS_EXECUTION_GUIDANCE, build_prompt, extract_answer  # noqa: E402
 from app.settings import Settings  # noqa: E402
 
 
@@ -21,6 +21,12 @@ def test_build_prompt_keeps_recent_context():
 	assert "检查库存" in prompt
 	assert "发现两项短缺" in prompt
 	assert prompt.endswith("继续处理")
+
+
+def test_build_prompt_adds_windows_execution_guidance_without_history():
+	prompt = build_prompt("Create a spreadsheet", [])
+	assert WINDOWS_EXECUTION_GUIDANCE in prompt
+	assert prompt.endswith("Create a spreadsheet")
 
 
 def test_extract_answer_prefers_named_final_answer():

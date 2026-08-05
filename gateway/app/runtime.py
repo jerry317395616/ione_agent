@@ -14,6 +14,13 @@ import yaml
 from app.settings import Settings
 from app.store import RunStore, utc_now
 
+WINDOWS_EXECUTION_GUIDANCE = (
+	"Windows execution rule: run_shell only launches an allow-listed application executable. "
+	"Never use run_shell for shell scripts, redirection, cmd.exe, or PowerShell. "
+	"Open the target application directly (for example excel.exe, winword.exe, or notepad.exe), "
+	"then complete the task through UI automation. Include this rule in every Windows task description and tips."
+)
+
 
 def git_commit(repo: Path) -> str:
 	try:
@@ -28,6 +35,10 @@ def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = Non
 	system_path = settings.ufo_root / "config" / "ufo" / "system.yaml"
 	system = yaml.safe_load(system_path.read_text(encoding="utf-8")) or {}
 	system["TOP_P"] = 0.8
+	system["MAX_STEP"] = settings.max_step
+	system["MAX_RETRY"] = 3
+	system["TIMEOUT"] = 120
+	system["REQUEST_TIMEOUT"] = 120
 	system_path.write_text(yaml.safe_dump(system, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 	config_dir = settings.ufo_root / "config" / "galaxy"
@@ -118,8 +129,10 @@ def extract_answer(result: dict[str, Any], events: list[dict[str, Any]]) -> str:
 
 def build_prompt(request: str, history: list[dict[str, str]]) -> str:
 	if not history:
-		return request
+		return f"{WINDOWS_EXECUTION_GUIDANCE}\n\n{request}"
 	lines = ["以下是同一对话中的最近上下文，仅用于理解当前任务："]
+	lines.insert(0, "")
+	lines.insert(0, WINDOWS_EXECUTION_GUIDANCE)
 	for item in history[-12:]:
 		role = "用户" if item.get("role") == "user" else "智能体"
 		lines.append(f"{role}：{item.get('content', '')}")
@@ -203,6 +216,7 @@ class UFORuntime:
 					"description": item["device_name"],
 					"user_id": item["user_id"],
 					"client_version": item["client_version"],
+					"tips": WINDOWS_EXECUTION_GUIDANCE,
 				},
 				"auto_connect": True,
 				"max_retries": 5,
