@@ -24,6 +24,10 @@ def test_expected_doctypes_exist():
 		"I-ONE Agent Run",
 		"I-ONE Agent Device",
 		"I-ONE Agent Pairing",
+		"I-ONE Lead Discovery Profile",
+		"I-ONE Lead Source",
+		"I-ONE Lead Discovery Task",
+		"I-ONE Lead Candidate",
 	}
 
 

@@ -7,6 +7,12 @@ from frappe import _
 from frappe.utils import cint, convert_utc_to_system_timezone, flt, get_datetime, now_datetime
 
 from ione_agent.gateway import GatewayClient, GatewayError
+from ione_agent.lead_service import (
+	build_discovery_payload,
+	create_task,
+	sync_task,
+)
+from ione_agent.orchestrator import OrchestratorClient, OrchestratorError
 
 SESSION_DTYPE = "I-ONE Agent Session"
 MESSAGE_DTYPE = "I-ONE Agent Message"
@@ -96,6 +102,8 @@ def _serialize_run(doc, events: list[dict[str, Any]] | None = None) -> dict[str,
 	return {
 		"name": doc.name,
 		"session": doc.session,
+		"run_type": doc.run_type,
+		"discovery_task": doc.discovery_task,
 		"status": doc.status,
 		"progress": flt(doc.progress),
 		"current_stage": doc.current_stage,
@@ -141,6 +149,10 @@ def get_bootstrap(session: str | None = None) -> dict[str, Any]:
 		health.update(GatewayClient().health())
 	except GatewayError:
 		pass
+	try:
+		health["lead_discovery"] = OrchestratorClient().health()
+	except OrchestratorError:
+		health["lead_discovery"] = {"status": "unavailable"}
 
 	return {
 		"user": user,
@@ -181,8 +193,29 @@ def get_messages(session: str | None = None) -> list[dict[str, Any]]:
 	return [_serialize_message(row) for row in rows]
 
 
+def _lead_intent_hint(message: str) -> bool:
+	normalized = message.lower()
+	objects = ("线索", "招标", "投标", "采购公告", "商机", "获客")
+	actions = ("找", "搜", "搜索", "收集", "整理", "发现", "分析", "监测")
+	return any(word in normalized for word in objects) and any(word in normalized for word in actions)
+
+
+def _execution_mode(message: str) -> str:
+	if _lead_intent_hint(message):
+		return "lead_discovery"
+	try:
+		return OrchestratorClient().classify(message)
+	except OrchestratorError:
+		return "desktop"
+
+
 @frappe.whitelist()
-def send_message(message: str, session: str | None = None) -> dict[str, Any]:
+def send_message(
+	message: str,
+	session: str | None = None,
+	profile: str | None = None,
+	execution_mode: str | None = None,
+) -> dict[str, Any]:
 	user = _require_user()
 	message = (message or "").strip()
 	if not message:
@@ -210,6 +243,7 @@ def send_message(message: str, session: str | None = None) -> dict[str, Any]:
 	if active_run:
 		frappe.throw(_("当前对话仍有任务在执行，请等待完成或先停止任务。"))
 
+	run_type = execution_mode if execution_mode in {"desktop", "lead_discovery"} else _execution_mode(message)
 	user_message = _new_message(session=session_doc.name, user=user, role="user", content=message)
 	run = frappe.get_doc(
 		{
@@ -217,8 +251,9 @@ def send_message(message: str, session: str | None = None) -> dict[str, Any]:
 			"session": session_doc.name,
 			"user": user,
 			"status": "Queued",
+			"run_type": run_type,
 			"progress": 0,
-			"current_stage": "等待 UFO3 接收任务",
+			"current_stage": "等待 AI 获客编排服务接收任务" if run_type == "lead_discovery" else "等待 UFO3 接收任务",
 			"request_text": message,
 			"user_message": user_message.name,
 		}
@@ -238,16 +273,22 @@ def send_message(message: str, session: str | None = None) -> dict[str, Any]:
 
 	history = get_messages(session_doc.name)[-20:]
 	try:
-		gateway_run = GatewayClient().start_run(
-			{
-				"client_run_id": run.name,
-				"session_id": session_doc.gateway_session_id or session_doc.name,
-				"user_id": user,
-				"request": message,
-				"history": [{"role": item["role"], "content": item["content"]} for item in history[:-1]],
-			}
-		)
-	except GatewayError as exc:
+		if run_type == "lead_discovery":
+			task = create_task(user=user, request=message, agent_run=run.name, profile=profile)
+			run.db_set("discovery_task", task.name, update_modified=False)
+			gateway_run = OrchestratorClient().start_run(build_discovery_payload(task))
+			task.db_set("orchestrator_run_id", gateway_run["run_id"], update_modified=False)
+		else:
+			gateway_run = GatewayClient().start_run(
+				{
+					"client_run_id": run.name,
+					"session_id": session_doc.gateway_session_id or session_doc.name,
+					"user_id": user,
+					"request": message,
+					"history": [{"role": item["role"], "content": item["content"]} for item in history[:-1]],
+				}
+			)
+	except (GatewayError, OrchestratorError) as exc:
 		run.db_set("status", "Failed", update_modified=False)
 		run.db_set("current_stage", "网关连接失败", update_modified=False)
 		run.db_set("error_message", str(exc), update_modified=False)
@@ -267,7 +308,7 @@ def send_message(message: str, session: str | None = None) -> dict[str, Any]:
 
 	run.db_set("gateway_run_id", gateway_run["run_id"], update_modified=False)
 	run.db_set("status", STATUS_MAP.get(gateway_run.get("status"), "Queued"), update_modified=False)
-	if gateway_run.get("session_id") and not session_doc.gateway_session_id:
+	if run_type == "desktop" and gateway_run.get("session_id") and not session_doc.gateway_session_id:
 		frappe.db.set_value(
 			SESSION_DTYPE,
 			session_doc.name,
@@ -284,7 +325,8 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 	run.progress = flt(payload.get("progress"))
 	run.current_stage = payload.get("current_stage") or run.current_stage
 	run.error_message = payload.get("error") or ""
-	run.response_text = payload.get("answer") or ""
+	result = payload.get("result") or {}
+	run.response_text = payload.get("answer") or result.get("summary") or ""
 	run.ufo_commit = payload.get("ufo_commit") or run.ufo_commit
 	run.model = payload.get("model") or run.model
 	if payload.get("started_at"):
@@ -293,12 +335,18 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 		run.completed_at = _gateway_datetime(payload["completed_at"])
 	run.elapsed_seconds = flt(payload.get("elapsed_seconds"))
 	run.save(ignore_permissions=True)
+	if run.run_type == "lead_discovery" and run.discovery_task:
+		sync_task(run.discovery_task, payload)
 
 	if status not in TERMINAL_STATUSES:
 		return
 	if not run.assistant_message:
 		if status == "Completed":
-			content = run.response_text or "UFO3 已完成任务，但没有返回可显示的文本结果。"
+			content = run.response_text or (
+				"AI 获客任务已完成，候选线索已写入获客池。"
+				if run.run_type == "lead_discovery"
+				else "UFO3 已完成任务，但没有返回可显示的文本结果。"
+			)
 			message_type = "text"
 		else:
 			content = run.error_message or ("任务已停止。" if status == "Stopped" else "任务执行失败。")
@@ -332,10 +380,14 @@ def get_run(run: str) -> dict[str, Any]:
 	events: list[dict[str, Any]] = []
 	if doc.status not in TERMINAL_STATUSES and doc.gateway_run_id:
 		try:
-			payload = GatewayClient().get_run(doc.gateway_run_id)
+			payload = (
+				OrchestratorClient().get_run(doc.gateway_run_id)
+				if doc.run_type == "lead_discovery"
+				else GatewayClient().get_run(doc.gateway_run_id)
+			)
 			_sync_run(doc, payload)
 			events = payload.get("events") or []
-		except GatewayError as exc:
+		except (GatewayError, OrchestratorError) as exc:
 			return {**_serialize_run(doc), "poll_error": str(exc)}
 	return _serialize_run(doc, events)
 
@@ -347,9 +399,13 @@ def stop_run(run: str) -> dict[str, Any]:
 		return _serialize_run(doc)
 	if doc.gateway_run_id:
 		try:
-			payload = GatewayClient().stop_run(doc.gateway_run_id)
+			payload = (
+				OrchestratorClient().stop_run(doc.gateway_run_id)
+				if doc.run_type == "lead_discovery"
+				else GatewayClient().stop_run(doc.gateway_run_id)
+			)
 			_sync_run(doc, payload)
-		except GatewayError as exc:
+		except (GatewayError, OrchestratorError) as exc:
 			frappe.throw(str(exc))
 	return _serialize_run(doc)
 

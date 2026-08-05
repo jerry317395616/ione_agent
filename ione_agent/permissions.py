@@ -46,6 +46,18 @@ def pairing_query(user: str | None = None) -> str:
 	return _owner_query(user)
 
 
+def profile_query(user: str | None = None) -> str:
+	return _owner_query(user)
+
+
+def discovery_task_query(user: str | None = None) -> str:
+	return _owner_query(user)
+
+
+def candidate_query(user: str | None = None) -> str:
+	return _owner_query(user)
+
+
 def _document_permission(doc, user: str | None = None) -> bool:
 	user = _user(user)
 	return user == "Administrator" or _is_manager(user) or doc.user == user
@@ -68,4 +80,16 @@ def device_permission(doc, user: str | None = None, **kwargs) -> bool:
 
 
 def pairing_permission(doc, user: str | None = None, **kwargs) -> bool:
+	return _document_permission(doc, user)
+
+
+def profile_permission(doc, user: str | None = None, **kwargs) -> bool:
+	return _document_permission(doc, user)
+
+
+def discovery_task_permission(doc, user: str | None = None, **kwargs) -> bool:
+	return _document_permission(doc, user)
+
+
+def candidate_permission(doc, user: str | None = None, **kwargs) -> bool:
 	return _document_permission(doc, user)

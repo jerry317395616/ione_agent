@@ -15,7 +15,7 @@
         <img src="/assets/ione_agent/images/ione-agent-logo.svg" alt="" width="34" height="34">
         <div>
           <strong>I-ONE Agent</strong>
-          <span>UFO³ 智能执行</span>
+          <span>企业智能执行与获客</span>
         </div>
         <button id="close-sidebar" class="icon-button mobile-only" type="button" aria-label="关闭对话列表" title="关闭">
           <span aria-hidden="true">×</span>
@@ -46,7 +46,7 @@
         </button>
         <div class="conversation-title">
           <strong id="conversation-title">新对话</strong>
-          <span id="conversation-subtitle">让 UFO³ 规划并执行你的任务</span>
+          <span id="conversation-subtitle">用自然语言完成业务、调研和桌面任务</span>
         </div>
         <div id="gateway-indicator" class="gateway-indicator" data-status="checking">
           <span class="status-dot" aria-hidden="true"></span>
@@ -62,7 +62,7 @@
         <div id="empty-state" class="empty-state">
           <img src="/assets/ione_agent/images/ione-agent-logo.svg" alt="" width="58" height="58">
           <h1>今天需要完成什么？</h1>
-          <p>描述目标、约束和期望结果，UFO³ 会拆解任务并调用已连接的执行设备。</p>
+          <p>描述目标、行业、地区和时间范围，Agent 会选择合适的执行流程并保留完整证据。</p>
           <div class="suggestion-grid" aria-label="示例指令">
             <button class="suggestion" type="button" data-prompt="分析本周销售与回款情况，列出异常并给出下一步建议。">
               <strong>经营分析</strong><span>汇总业务数据并识别异常</span>
@@ -73,6 +73,9 @@
             <button class="suggestion" type="button" data-prompt="检查当前库存风险，重点说明短缺、积压和补货建议。">
               <strong>库存检查</strong><span>发现短缺与积压风险</span>
             </button>
+            <button class="suggestion" type="button" data-prompt="寻找近30天医疗行业的招标和采购线索，优先政府采购与公共资源交易官方来源，分析需求并整理到候选线索池。">
+              <strong>AI 招标获客</strong><span>联网调研、分析并写入 CRM</span>
+            </button>
           </div>
         </div>
         <div id="message-list" class="message-list"></div>
@@ -82,7 +85,7 @@
         <div class="run-summary">
           <span id="run-spinner" class="run-spinner" aria-hidden="true"></span>
           <div>
-            <strong id="run-stage">UFO³ 正在处理</strong>
+            <strong id="run-stage">Agent 正在处理</strong>
             <span id="run-meta">正在建立执行计划</span>
           </div>
           <button id="stop-run" class="stop-button" type="button">停止</button>

@@ -1,0 +1,20 @@
+[Unit]
+Description=I-ONE Lead Intelligence Orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/zyd/services/ione-agent-orchestrator/current/orchestrator
+EnvironmentFile=/home/zyd/.config/ione/ione-agent-orchestrator.env
+ExecStart=/home/zyd/services/ione-agent-orchestrator/venv/bin/uvicorn app.main:app --host 10.144.133.1 --port 8100 --workers 1
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ione-agent-orchestrator
+
+[Install]
+WantedBy=multi-user.target

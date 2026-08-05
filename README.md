@@ -1,10 +1,14 @@
 # I-ONE Agent
 
-I-ONE Agent is a focused Frappe application that provides one enterprise Agent conversation workspace. It stores users, sessions, messages and execution records in Frappe while delegating Agent execution to the official UFO3 `main` runtime through the bundled FastAPI gateway.
+I-ONE Agent is a Frappe application for enterprise conversations, verifiable lead intelligence and controlled desktop execution. It stores users, tasks, evidence, candidates and execution records in Frappe while delegating long-running work to isolated services.
 
 ## Architecture
 
 - Frappe: authentication, permissions, session/message persistence and the `/agent` user interface.
+- Lead Intelligence Orchestrator: LangGraph workflow for intent parsing, research, analysis, review and idempotent result synchronization.
+- Hermes Agent: internet research against configured official tender and procurement sources.
+- Qwen: primary model for intent parsing, structured extraction, scoring and summaries.
+- DeepSeek: auxiliary reviewer that produces the sales pursuit plan attached to each qualified lead.
 - I-ONE UFO Gateway: isolated Python 3.10 service that owns UFO3 execution and run events.
 - UFO3: pinned from the official Microsoft UFO repository `main` branch during the gateway build.
 - Qwen: OpenAI-compatible model endpoint supplied through gateway environment variables.
@@ -28,10 +32,18 @@ The computer makes an outbound-only TLS WebSocket connection. It does not expose
 ```json
 {
   "ione_agent_gateway_url": "http://10.144.133.1:8098",
-  "ione_agent_gateway_token": "replace-with-a-long-random-token"
+  "ione_agent_gateway_token": "replace-with-a-long-random-token",
+  "ione_agent_orchestrator_url": "http://10.144.133.1:8100",
+  "ione_agent_orchestrator_token": "replace-with-a-different-long-random-token"
 }
 ```
 
 ## Gateway configuration
 
 Copy `gateway/.env.example` to a protected deployment environment and fill in the values. See `gateway/README.md` for runtime details.
+
+## Natural-language lead discovery
+
+Users can ask, for example, “寻找近 30 天医疗行业的招标和采购线索，分析需求并整理到候选线索池”。 The request is routed to the LangGraph orchestrator instead of the desktop executor. Results are first stored in **AI 获客 > 候选线索** with source URLs, evidence, confidence and model status. CRM Leads are created only when the profile enables automatic creation or a user explicitly confirms a candidate.
+
+The orchestrator is deployed from `orchestrator/`. Copy `.env.example` to a protected environment file and never commit tokens.

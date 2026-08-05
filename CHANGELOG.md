@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Add natural-language lead and tender discovery with a persistent LangGraph orchestrator.
+- Add Hermes research, Qwen extraction and DeepSeek auxiliary review adapters.
+- Add lead profiles, trusted sources, discovery tasks and evidence-backed candidates.
+- Add controlled, traceable CRM Lead creation without modifying Frappe CRM source.
+- Add the Chinese AI 获客 workspace and a lead-discovery starter in `/agent`.
+
 ## 0.2.13
 
 - Fall back to Win32 window restoration and focus when UFO's standard UI focus call fails.

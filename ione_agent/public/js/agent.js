@@ -359,12 +359,12 @@
 
   function eventLabel(event) {
     const data = event.data || {};
-    return data.message || data.event_name || event.output_type || event.event_type || "UFO³ 执行事件";
+    return data.message || data.event_name || event.output_type || event.event_type || "Agent 执行事件";
   }
 
   function showRun(run) {
     els.runPanel.hidden = false;
-    els.runStage.textContent = run.current_stage || "UFO³ 正在处理";
+    els.runStage.textContent = run.current_stage || "Agent 正在处理";
     const pieces = [];
     if (run.model) pieces.push(run.model);
     if (run.elapsed_seconds) pieces.push(`${Number(run.elapsed_seconds).toFixed(1)} 秒`);

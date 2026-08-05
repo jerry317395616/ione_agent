@@ -1,0 +1,40 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:profile_name",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["profile_name", "user", "enabled", "scope_section", "industry", "regions", "keywords", "excluded_keywords", "time_column", "days_back", "minimum_budget", "maximum_results", "score_threshold", "crm_section", "auto_create_crm", "crm_lead_owner", "source_notes"],
+ "fields": [
+  {"fieldname":"profile_name","fieldtype":"Data","label":"配置名称","reqd":1,"unique":1,"in_list_view":1,"search_index":1},
+  {"fieldname":"user","fieldtype":"Link","label":"负责人","options":"User","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"enabled","fieldtype":"Check","label":"启用","default":"1","in_list_view":1},
+  {"fieldname":"scope_section","fieldtype":"Section Break","label":"搜索范围"},
+  {"fieldname":"industry","fieldtype":"Data","label":"行业","reqd":1,"in_list_view":1},
+  {"fieldname":"regions","fieldtype":"Small Text","label":"目标地区","description":"多个地区用逗号分隔；留空表示全国。"},
+  {"fieldname":"keywords","fieldtype":"Small Text","label":"包含关键词","description":"用于补充自然语言指令，不会替代 AI 的语义判断。"},
+  {"fieldname":"excluded_keywords","fieldtype":"Small Text","label":"排除关键词"},
+  {"fieldname":"time_column","fieldtype":"Column Break"},
+  {"fieldname":"days_back","fieldtype":"Int","label":"检索最近天数","default":"30","reqd":1},
+  {"fieldname":"minimum_budget","fieldtype":"Currency","label":"最低预算"},
+  {"fieldname":"maximum_results","fieldtype":"Int","label":"最多候选数","default":"30","reqd":1},
+  {"fieldname":"score_threshold","fieldtype":"Percent","label":"CRM 入库分数线","default":"70","reqd":1},
+  {"fieldname":"crm_section","fieldtype":"Section Break","label":"CRM 入库策略"},
+  {"fieldname":"auto_create_crm","fieldtype":"Check","label":"自动创建 CRM 线索","default":"0"},
+  {"fieldname":"crm_lead_owner","fieldtype":"Link","label":"CRM 线索负责人","options":"User"},
+  {"fieldname":"source_notes","fieldtype":"Small Text","label":"来源要求","description":"例如：优先政府采购网、公共资源交易中心和招标人官网。"}
+ ],
+ "index_web_pages_for_search": 0,
+ "module": "I-ONE Agent",
+ "name": "I-ONE Lead Discovery Profile",
+ "naming_rule": "By fieldname",
+ "permissions": [
+  {"role":"I-ONE Agent User","create":1,"read":1,"write":1},
+  {"role":"I-ONE Agent Manager","create":1,"read":1,"write":1,"delete":1,"report":1,"export":1},
+  {"role":"System Manager","create":1,"read":1,"write":1,"delete":1,"report":1,"export":1}
+ ],
+ "search_fields": "profile_name,industry,regions,user",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

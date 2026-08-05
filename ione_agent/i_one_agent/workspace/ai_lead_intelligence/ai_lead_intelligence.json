@@ -1,0 +1,42 @@
+{
+ "app": "ione_agent",
+ "charts": [],
+ "content": "[{\"id\":\"lead-task\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"获客任务\",\"col\":3}},{\"id\":\"lead-candidate\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"候选线索\",\"col\":3}},{\"id\":\"lead-profile\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"获客配置\",\"col\":3}},{\"id\":\"lead-spacer\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"lead-execution\",\"type\":\"card\",\"data\":{\"card_name\":\"执行与线索\",\"col\":6}},{\"id\":\"lead-settings\",\"type\":\"card\",\"data\":{\"card_name\":\"策略与来源\",\"col\":6}}]",
+ "custom_blocks": [],
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "search",
+ "is_hidden": 0,
+ "label": "AI 获客",
+ "links": [
+  {"type":"Card Break","label":"执行与线索","link_type":"DocType","link_count":2,"hidden":0,"onboard":0,"is_query_report":0},
+  {"type":"Link","label":"获客任务","link_type":"DocType","link_to":"I-ONE Lead Discovery Task","link_count":0,"hidden":0,"onboard":0,"is_query_report":0},
+  {"type":"Link","label":"候选线索","link_type":"DocType","link_to":"I-ONE Lead Candidate","link_count":0,"hidden":0,"onboard":0,"is_query_report":0},
+  {"type":"Card Break","label":"策略与来源","link_type":"DocType","link_count":2,"hidden":0,"onboard":0,"is_query_report":0},
+  {"type":"Link","label":"获客配置","link_type":"DocType","link_to":"I-ONE Lead Discovery Profile","link_count":0,"hidden":0,"onboard":0,"is_query_report":0},
+  {"type":"Link","label":"信息来源","link_type":"DocType","link_to":"I-ONE Lead Source","link_count":0,"hidden":0,"onboard":0,"is_query_report":0}
+ ],
+ "module": "I-ONE Agent",
+ "name": "AI 获客",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [{"role":"I-ONE Agent User"},{"role":"I-ONE Agent Manager"},{"role":"System Manager"}],
+ "sequence_id": 2,
+ "shortcuts": [
+  {"type":"DocType","link_to":"I-ONE Lead Discovery Task","doc_view":"List","label":"获客任务","color":"Blue","stats_filter":"[]"},
+  {"type":"DocType","link_to":"I-ONE Lead Candidate","doc_view":"List","label":"候选线索","color":"Green","stats_filter":"[]"},
+  {"type":"DocType","link_to":"I-ONE Lead Discovery Profile","doc_view":"List","label":"获客配置","color":"Orange","stats_filter":"[]"}
+ ],
+ "sidebar_items": [
+  {"type":"Link","label":"获客任务","link_type":"DocType","link_to":"I-ONE Lead Discovery Task","icon":"radar","default_workspace":0,"child":0,"open_in_new_tab":0,"collapsible":1,"indent":0,"keep_closed":0,"show_arrow":0},
+  {"type":"Link","label":"候选线索","link_type":"DocType","link_to":"I-ONE Lead Candidate","icon":"users","default_workspace":0,"child":0,"open_in_new_tab":0,"collapsible":1,"indent":0,"keep_closed":0,"show_arrow":0},
+  {"type":"Link","label":"获客配置","link_type":"DocType","link_to":"I-ONE Lead Discovery Profile","icon":"sliders-horizontal","default_workspace":0,"child":0,"open_in_new_tab":0,"collapsible":1,"indent":0,"keep_closed":0,"show_arrow":0},
+  {"type":"Link","label":"信息来源","link_type":"DocType","link_to":"I-ONE Lead Source","icon":"globe","default_workspace":0,"child":0,"open_in_new_tab":0,"collapsible":1,"indent":0,"keep_closed":0,"show_arrow":0}
+ ],
+ "standard": 1,
+ "title": "AI 获客",
+ "type": "Workspace"
+}
