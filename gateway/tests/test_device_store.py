@@ -29,6 +29,8 @@ def test_register_authenticate_and_revoke(tmp_path):
 	assert registered["capabilities"] == ["excel", "desktop_automation"]
 	assert store.authenticate("windows-test-device", "a" * 48)
 	assert not store.authenticate("windows-test-device", "b" * 48)
+	assert store.authenticate_token("a" * 48)["device_id"] == "windows-test-device"
+	assert store.authenticate_token("b" * 48) is None
 
 	store.set_status("windows-test-device", "online")
 	assert store.get("windows-test-device")["status"] == "online"
@@ -37,6 +39,7 @@ def test_register_authenticate_and_revoke(tmp_path):
 	store.revoke("windows-test-device")
 	assert store.get("windows-test-device")["revoked"] is True
 	assert not store.authenticate("windows-test-device", "a" * 48)
+	assert store.authenticate_token("a" * 48) is None
 
 
 def test_register_rotates_token_and_reactivates_device(tmp_path):

@@ -177,6 +177,8 @@ def claim_pairing(
 		"device_id": device_id,
 		"device_name": device_name,
 		"connection_url": gateway_device["connection_url"],
+		"model_api_base": gateway_device["model_api_base"],
+		"model": gateway_device["model"],
 		"client_version": client_version,
 	}
 

@@ -105,6 +105,17 @@ class DeviceStore:
 			and hmac.compare_digest(device["token_hash"], token_digest(token))
 		)
 
+	def authenticate_token(self, token: str) -> dict[str, Any] | None:
+		digest = token_digest(token)
+		with self.lock:
+			rows = self.connection.execute(
+				"SELECT * FROM devices WHERE revoked = 0"
+			).fetchall()
+		for row in rows:
+			if hmac.compare_digest(row["token_hash"], digest):
+				return self._serialize(row)
+		return None
+
 	def set_status(self, device_id: str, status: str) -> None:
 		with self.lock, self.connection:
 			self.connection.execute(

@@ -56,3 +56,4 @@ def test_openai_base_url_does_not_duplicate_chat_completions(tmp_path):
 	)
 
 	assert settings.openai_base_url == "http://qwen:1234/v1"
+	assert settings.device_model_api_base == "https://agent-device.example.com/device/openai/v1"

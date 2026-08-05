@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 import hmac
 from contextlib import asynccontextmanager
+from typing import Annotated
 from urllib.parse import quote
 
+import httpx
 import websockets
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.background import BackgroundTask
+from fastapi.responses import StreamingResponse
 
 from app.device_store import DeviceStore
 from app.models import CreateRunRequest, RegisterDeviceRequest
@@ -25,6 +29,16 @@ def authorize(authorization: str | None = Header(default=None)) -> None:
 	expected = f"Bearer {settings.gateway_token}"
 	if not authorization or not hmac.compare_digest(authorization, expected):
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
+def authorize_device(authorization: str | None = Header(default=None)) -> dict:
+	prefix = "Bearer "
+	if not authorization or not authorization.startswith(prefix):
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+	device = device_store.authenticate_token(authorization[len(prefix) :])
+	if not device:
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+	return device
 
 
 @asynccontextmanager
@@ -66,11 +80,48 @@ async def register_device(request: RegisterDeviceRequest) -> dict:
 	separator = "&" if "?" in settings.device_public_ws_url else "?"
 	return {
 		**public_device(device),
+		"model": settings.qwen_model,
+		"model_api_base": settings.device_model_api_base,
 		"connection_url": (
 			f"{settings.device_public_ws_url}{separator}device_id={quote(request.device_id)}"
 			f"&token={quote(request.device_token)}"
 		),
 	}
+
+
+@app.post("/device/openai/v1/chat/completions")
+async def device_chat_completions(
+	request: Request,
+	device: Annotated[dict, Depends(authorize_device)],
+) -> StreamingResponse:
+	body = await request.body()
+	client = httpx.AsyncClient(timeout=None)
+	upstream_request = client.build_request(
+		"POST",
+		f"{settings.openai_base_url}/chat/completions",
+		content=body,
+		headers={
+			"Authorization": f"Bearer {settings.qwen_api_key}",
+			"Content-Type": request.headers.get("content-type", "application/json"),
+			"X-I-ONE-Device-ID": device["device_id"],
+		},
+	)
+	try:
+		response = await client.send(upstream_request, stream=True)
+	except Exception:
+		await client.aclose()
+		raise
+
+	async def close_upstream() -> None:
+		await response.aclose()
+		await client.aclose()
+
+	return StreamingResponse(
+		response.aiter_raw(),
+		status_code=response.status_code,
+		media_type=response.headers.get("content-type", "application/json"),
+		background=BackgroundTask(close_upstream),
+	)
 
 
 @app.get("/v1/devices", dependencies=[Depends(authorize)])

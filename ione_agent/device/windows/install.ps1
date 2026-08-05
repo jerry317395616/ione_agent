@@ -24,6 +24,66 @@ function Protect-DeviceConfig([hashtable]$Config) {
     if ($LASTEXITCODE -ne 0) { throw "Unable to secure the device configuration." }
 }
 
+function Read-DeviceConfig {
+    $encrypted = (Get-Content -Raw $ConfigPath).Trim()
+    $secure = ConvertTo-SecureString $encrypted
+    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) | ConvertFrom-Json)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+    }
+}
+
+function Get-QueryParameter([string]$Url, [string]$Name) {
+    $query = ([Uri]$Url).Query.TrimStart("?")
+    foreach ($pair in $query.Split("&")) {
+        $parts = $pair.Split("=", 2)
+        if ($parts.Length -eq 2 -and $parts[0] -eq $Name) {
+            return [Uri]::UnescapeDataString($parts[1])
+        }
+    }
+    throw "The device connection URL does not contain $Name."
+}
+
+function Get-ModelApiBase([string]$ConnectionUrl) {
+    $uri = [Uri]$ConnectionUrl
+    $scheme = if ($uri.Scheme -eq "wss") { "https" } else { "http" }
+    return "${scheme}://$($uri.Authority)/device/openai/v1"
+}
+
+function Write-UfoAgentConfig($Config) {
+    $deviceToken = Get-QueryParameter $Config.connection_url "token"
+    $agentCommon = [ordered]@{
+        VISUAL_MODE = $true
+        REASONING_MODEL = $false
+        API_TYPE = "openai"
+        API_BASE = $Config.model_api_base
+        API_KEY = $deviceToken
+        API_MODEL = $Config.model
+    }
+    $agents = [ordered]@{
+        HOST_AGENT = $agentCommon + [ordered]@{
+            PROMPT = "ufo/prompts/share/base/host_agent.yaml"
+            EXAMPLE_PROMPT = "ufo/prompts/examples/{mode}/host_agent_example.yaml"
+        }
+        APP_AGENT = $agentCommon + [ordered]@{
+            PROMPT = "ufo/prompts/share/base/app_agent.yaml"
+            EXAMPLE_PROMPT = "ufo/prompts/examples/{mode}/app_agent_example.yaml"
+            EXAMPLE_PROMPT_AS = "ufo/prompts/examples/{mode}/app_agent_example_as.yaml"
+        }
+        BACKUP_AGENT = $agentCommon
+        EVALUATION_AGENT = $agentCommon
+    }
+    $configRoot = Join-Path $UfoRoot "config\ufo"
+    New-Item -ItemType Directory -Force -Path $configRoot | Out-Null
+    $agentsPath = Join-Path $configRoot "agents.yaml"
+    $json = $agents | ConvertTo-Json -Depth 8
+    [IO.File]::WriteAllText($agentsPath, $json, (New-Object Text.UTF8Encoding($false)))
+    & icacls.exe $agentsPath /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Unable to secure the UFO model configuration." }
+}
+
 function Get-UvPath {
     $command = Get-Command uv.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -61,6 +121,8 @@ if (-not (Test-Path $ConfigPath)) {
         device_id = $response.message.device_id
         device_name = $response.message.device_name
         connection_url = $response.message.connection_url
+        model_api_base = $response.message.model_api_base
+        model = $response.message.model
         site_url = $SiteUrl
     }
 }
@@ -82,6 +144,23 @@ if (-not (Test-Path (Join-Path $UfoRoot ".git"))) {
     & $Git -C $UfoRoot pull --ff-only origin main
     if ($LASTEXITCODE -ne 0) { throw "Unable to update Microsoft UFO." }
 }
+
+$DeviceConfig = Read-DeviceConfig
+if (-not $DeviceConfig.model_api_base -or -not $DeviceConfig.model) {
+    $modelApiBase = Get-ModelApiBase $DeviceConfig.connection_url
+    $modelInfo = Invoke-RestMethod -Uri (([Uri]$modelApiBase).GetLeftPart([UriPartial]::Authority) + "/health")
+    $DeviceConfig | Add-Member -NotePropertyName model_api_base -NotePropertyValue $modelApiBase -Force
+    $DeviceConfig | Add-Member -NotePropertyName model -NotePropertyValue $modelInfo.model -Force
+    Protect-DeviceConfig @{
+        device_id = $DeviceConfig.device_id
+        device_name = $DeviceConfig.device_name
+        connection_url = $DeviceConfig.connection_url
+        model_api_base = $DeviceConfig.model_api_base
+        model = $DeviceConfig.model
+        site_url = $DeviceConfig.site_url
+    }
+}
+Write-UfoAgentConfig $DeviceConfig
 
 $Uv = Get-UvPath
 Write-Host "Preparing Python $PythonVersion..."

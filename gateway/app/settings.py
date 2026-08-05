@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 
 def _required(name: str) -> str:
@@ -64,3 +65,9 @@ class Settings:
 			f"ws://{self.device_server_host}:{self.device_server_port}/ws"
 			f"?token={self.device_server_api_key}"
 		)
+
+	@property
+	def device_model_api_base(self) -> str:
+		parsed = urlsplit(self.device_public_ws_url)
+		scheme = "https" if parsed.scheme == "wss" else "http"
+		return urlunsplit((scheme, parsed.netloc, "/device/openai/v1", "", ""))
