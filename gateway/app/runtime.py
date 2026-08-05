@@ -32,6 +32,7 @@ WINDOWS_EXECUTION_GUIDANCE = (
 
 FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
 DEVICE_KEEPALIVE_INTERVAL_SECONDS = 20
+UFO_MAX_TOKENS = 800
 
 
 def device_heartbeat_message() -> str:
@@ -130,6 +131,31 @@ def patch_nonvisual_app_response() -> None:
 	AppLLMInteractionStrategy._parse_app_response = parse_app_response
 
 
+def patch_ufo_openai_runtime(ufo_root: Path) -> None:
+	"""Bound Qwen output and disable hidden reasoning for desktop control calls.
+
+	UFO main currently computes ``max_tokens`` but leaves it out of the OpenAI
+	request. On reasoning-capable Qwen models that can turn a short desktop action
+	into an unbounded generation and keep the device busy for many minutes.
+	"""
+	path = ufo_root / "ufo" / "llm" / "openai.py"
+	text = path.read_text(encoding="utf-8")
+	text = text.replace('# "max_tokens": max_tokens,', '"max_tokens": max_tokens,')
+	needle = '"n": 1,\n                **kwargs,'
+	replacement = (
+		'"n": 1,\n'
+		'                "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},\n'
+		'                **kwargs,'
+	)
+	if "enable_thinking" not in text:
+		if needle not in text:
+			raise RuntimeError("Unsupported UFO OpenAI client layout")
+		text = text.replace(needle, replacement, 1)
+	if '"max_tokens": max_tokens,' not in text:
+		raise RuntimeError("Unable to enable UFO max_tokens")
+	path.write_text(text, encoding="utf-8")
+
+
 def probe_websocket_server(host: str, port: int, path: str, timeout: float = 5) -> bool:
 	key = base64.b64encode(os.urandom(16)).decode("ascii")
 	request = (
@@ -160,8 +186,10 @@ def git_commit(repo: Path) -> str:
 
 
 def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = None) -> None:
+	patch_ufo_openai_runtime(settings.ufo_root)
 	system_path = settings.ufo_root / "config" / "ufo" / "system.yaml"
 	system = yaml.safe_load(system_path.read_text(encoding="utf-8")) or {}
+	system["MAX_TOKENS"] = UFO_MAX_TOKENS
 	system["TOP_P"] = 0.8
 	system["MAX_STEP"] = settings.max_step
 	system["MAX_RETRY"] = 3

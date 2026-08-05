@@ -9,6 +9,7 @@ sys.path.insert(0, str(GATEWAY_ROOT))
 
 from app.runtime import (  # noqa: E402
 	DEVICE_KEEPALIVE_INTERVAL_SECONDS,
+	UFO_MAX_TOKENS,
 	WINDOWS_EXECUTION_GUIDANCE,
 	build_prompt,
 	device_heartbeat_message,
@@ -16,6 +17,7 @@ from app.runtime import (  # noqa: E402
 	failure_message,
 	heartbeat_client_type,
 	normalize_app_response,
+	patch_ufo_openai_runtime,
 	probe_websocket_server,
 	result_failed,
 )
@@ -75,6 +77,23 @@ def test_legacy_nonvisual_action_includes_control_id():
 		"arguments": {"button": "left", "id": "12"},
 		"status": "CONTINUE",
 	}
+
+
+def test_ufo_openai_runtime_limits_qwen_generation(tmp_path):
+	path = tmp_path / "ufo" / "llm" / "openai.py"
+	path.parent.mkdir(parents=True)
+	path.write_text(
+		'base_params = {\n                "n": 1,\n                **kwargs,\n'
+		'                # "max_tokens": max_tokens,\n}\n',
+		encoding="utf-8",
+	)
+
+	patch_ufo_openai_runtime(tmp_path)
+
+	patched = path.read_text(encoding="utf-8")
+	assert '"max_tokens": max_tokens,' in patched
+	assert '"enable_thinking": False' in patched
+	assert UFO_MAX_TOKENS == 800
 
 
 def test_extract_answer_prefers_named_final_answer():
