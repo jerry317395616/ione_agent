@@ -109,7 +109,7 @@ if (-not (Test-Path $ConfigPath)) {
         pairing_token = $PairingToken
         device_id = $DeviceId
         device_name = $env:COMPUTERNAME
-        client_version = "0.2.3"
+        client_version = "0.2.4"
     }
     Write-Host "Pairing this computer with I-ONE Agent..."
     $response = Invoke-RestMethod `
@@ -187,13 +187,34 @@ if ($LASTEXITCODE -ne 0) { throw "Unable to install UFO dependencies." }
 Copy-Item -Force (Join-Path $PSScriptRoot "launch.ps1") (Join-Path $Root "launch.ps1")
 Copy-Item -Force (Join-Path $PSScriptRoot "uninstall.ps1") (Join-Path $Root "uninstall.ps1")
 
+$ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($ExistingTask) {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and
+    $_.CommandLine -like "*$Root*" -and
+    ($_.CommandLine -like "*launch.ps1*" -or $_.CommandLine -like "*ufo.client.client*")
+} | Invoke-CimMethod -MethodName Terminate | Out-Null
+
 $Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $Action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -STA -File `"$Root\launch.ps1`""
 $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $Identity
 $Principal = New-ScheduledTaskPrincipal -UserId $Identity -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Force | Out-Null
+$Settings = New-ScheduledTaskSettingsSet `
+    -MultipleInstances IgnoreNew `
+    -RestartCount 999 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero)
+Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $Action `
+    -Trigger $Trigger `
+    -Principal $Principal `
+    -Settings $Settings `
+    -Force | Out-Null
 
 Start-ScheduledTask -TaskName $TaskName
 Write-Host "The device is registered and the desktop executor is starting."

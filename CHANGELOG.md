@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+
+- Enforce a single Windows desktop executor per signed-in user.
+- Clean up orphaned UFO clients when reinstalling or reconnecting.
+- Add device-server watchdog recovery for stalled WebSocket sessions.
+
 ## 0.2.3
 
 - Use Python 3.10 for compatibility with UFO's pinned Windows dependencies.
