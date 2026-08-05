@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.clients import parse_json
+from app.clients import DeepSeekClient, parse_json
 from app.settings import Settings
 from app.store import RunStore
 from app.workflow import LeadWorkflow
@@ -8,6 +8,10 @@ from app.workflow import LeadWorkflow
 
 def test_parse_json_accepts_fenced_payload():
 	assert parse_json('result\n```json\n{"intent":"lead_discovery"}\n```', {}) == {"intent": "lead_discovery"}
+
+
+def test_deepseek_extract_accepts_web_relay_reply():
+	assert DeepSeekClient._extract({"status": "completed", "reply": "[{\"fingerprint\": \"abc\"}]"}) == '[{"fingerprint": "abc"}]'
 
 
 def test_store_is_idempotent_and_persists_result(tmp_path: Path):

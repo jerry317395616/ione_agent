@@ -256,7 +256,7 @@ class DeepSeekClient:
 		if isinstance(payload, str):
 			return payload
 		if isinstance(payload, dict):
-			for key in ("answer", "result", "output", "content", "text", "message"):
+			for key in ("answer", "result", "output", "content", "text", "message", "reply"):
 				if key in payload:
 					value = DeepSeekClient._extract(payload[key])
 					if value:
