@@ -30,7 +30,9 @@ class Settings:
 	def from_environment(cls) -> Settings:
 		return cls(
 			api_token=required("IONE_ORCHESTRATOR_TOKEN"),
-			data_dir=Path(os.getenv("IONE_ORCHESTRATOR_DATA_DIR", "/var/lib/ione-agent-orchestrator")).resolve(),
+			data_dir=Path(
+				os.getenv("IONE_ORCHESTRATOR_DATA_DIR", "~/.local/share/ione-agent-orchestrator")
+			).expanduser().resolve(),
 			qwen_base_url=required("QWEN_API_BASE").rstrip("/"),
 			qwen_api_key=required("QWEN_API_KEY"),
 			qwen_model=os.getenv("QWEN_MODEL", "qwen3.6-35b-a3b-fp8").strip(),

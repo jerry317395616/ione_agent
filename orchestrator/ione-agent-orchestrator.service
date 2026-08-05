@@ -12,9 +12,7 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/lib/ione-agent-orchestrator
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
