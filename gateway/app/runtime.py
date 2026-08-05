@@ -31,6 +31,7 @@ WINDOWS_EXECUTION_GUIDANCE = (
 )
 
 FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
+INCOMPLETE_EVALUATION_STATES = {"false", "incomplete", "no", "unknown", "unsure"}
 DEVICE_KEEPALIVE_INTERVAL_SECONDS = 20
 UFO_MAX_TOKENS = 512
 
@@ -131,6 +132,55 @@ def patch_nonvisual_app_response() -> None:
 	AppLLMInteractionStrategy._parse_app_response = parse_app_response
 
 
+def patch_ufo_app_response_source(ufo_root: Path) -> None:
+	"""Make the separately spawned UFO device server accept legacy field names."""
+	path = (
+		ufo_root
+		/ "ufo"
+		/ "agents"
+		/ "processors"
+		/ "strategies"
+		/ "app_agent_processing_strategy.py"
+	)
+	text = path.read_text(encoding="utf-8")
+	marker = "I-ONE legacy nonvisual response compatibility."
+	if marker in text:
+		return
+	needle = (
+		"            response_dict = agent.response_to_dict(response_text)\n\n"
+		"            # Create structured response\n"
+		"            parsed_response = AppAgentResponse.model_validate(response_dict)"
+	)
+	replacement = (
+		"            response_dict = agent.response_to_dict(response_text)\n\n"
+		"            # I-ONE legacy nonvisual response compatibility.\n"
+		"            normalized = {str(key).lower(): value for key, value in response_dict.items()}\n"
+		"            if \"action\" not in normalized and any(\n"
+		"                key in normalized for key in (\"function\", \"args\", \"status\", \"controllabel\")\n"
+		"            ):\n"
+		"                function = str(normalized.pop(\"function\", \"\") or \"\").strip()\n"
+		"                status = str(normalized.pop(\"status\", \"\") or \"\").strip()\n"
+		"                arguments = normalized.pop(\"args\", {})\n"
+		"                if not isinstance(arguments, dict):\n"
+		"                    arguments = {}\n"
+		"                control_id = str(normalized.pop(\"controllabel\", \"\") or \"\").strip()\n"
+		"                if control_id and \"id\" not in arguments:\n"
+		"                    arguments[\"id\"] = control_id\n"
+		"                normalized.pop(\"controltext\", None)\n"
+		"                normalized[\"action\"] = (\n"
+		"                    {\"function\": function, \"arguments\": arguments, \"status\": status}\n"
+		"                    if function\n"
+		"                    else []\n"
+		"                )\n"
+		"            response_dict = normalized\n\n"
+		"            # Create structured response\n"
+		"            parsed_response = AppAgentResponse.model_validate(response_dict)"
+	)
+	if needle not in text:
+		raise RuntimeError("Unsupported UFO AppAgent response parser layout")
+	path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+
+
 def patch_ufo_openai_runtime(ufo_root: Path) -> None:
 	"""Bound Qwen output and disable hidden reasoning for desktop control calls.
 
@@ -171,6 +221,20 @@ def patch_ufo_openai_runtime(ufo_root: Path) -> None:
 	path.write_text(text, encoding="utf-8")
 
 
+def task_execution_failed(task_data: dict[str, Any]) -> bool:
+	"""Detect device-side failures hidden below a completed transport task."""
+	for path, value in _strings(task_data):
+		field = path.rsplit(".", 1)[-1].lower().rstrip("]")
+		state = value.lower()
+		if field in {"status", "state"} and state in FAILED_RESULT_STATES:
+			return True
+		if field in {"error", "exception"} and state not in {"none", "null"}:
+			return True
+		if field == "complete" and state in INCOMPLETE_EVALUATION_STATES:
+			return True
+	return False
+
+
 async def execute_single_device_task(client, request: str, device_id: str) -> dict[str, Any]:
 	"""Execute a desktop request as one UFO task when only one device is paired.
 
@@ -209,8 +273,7 @@ async def execute_single_device_task(client, request: str, device_id: str) -> di
 	)
 	constellation_data = constellation.to_dict()
 	task_data = constellation_data.get("tasks", {}).get(task.task_id, {})
-	task_status = str(task_data.get("status") or "").strip().lower()
-	failed = task_status in FAILED_RESULT_STATES
+	failed = task_execution_failed(task_data)
 	answer = "" if failed else f"已在连接的电脑上完成操作：{request}。"
 	return {
 		"status": "failed" if failed else result.get("status", "completed"),
@@ -253,6 +316,7 @@ def git_commit(repo: Path) -> str:
 
 
 def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = None) -> None:
+	patch_ufo_app_response_source(settings.ufo_root)
 	patch_ufo_openai_runtime(settings.ufo_root)
 	system_path = settings.ufo_root / "config" / "ufo" / "system.yaml"
 	system = yaml.safe_load(system_path.read_text(encoding="utf-8")) or {}

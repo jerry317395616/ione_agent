@@ -17,9 +17,11 @@ from app.runtime import (  # noqa: E402
 	failure_message,
 	heartbeat_client_type,
 	normalize_app_response,
+	patch_ufo_app_response_source,
 	patch_ufo_openai_runtime,
 	probe_websocket_server,
 	result_failed,
+	task_execution_failed,
 )
 from app.settings import Settings  # noqa: E402
 
@@ -100,6 +102,31 @@ def test_ufo_openai_runtime_limits_qwen_generation(tmp_path):
 	assert UFO_MAX_TOKENS == 512
 
 
+def test_ufo_device_server_source_accepts_legacy_nonvisual_response(tmp_path):
+	path = (
+		tmp_path
+		/ "ufo"
+		/ "agents"
+		/ "processors"
+		/ "strategies"
+		/ "app_agent_processing_strategy.py"
+	)
+	path.parent.mkdir(parents=True)
+	path.write_text(
+		"            response_dict = agent.response_to_dict(response_text)\n\n"
+		"            # Create structured response\n"
+		"            parsed_response = AppAgentResponse.model_validate(response_dict)\n",
+		encoding="utf-8",
+	)
+
+	patch_ufo_app_response_source(tmp_path)
+
+	patched = path.read_text(encoding="utf-8")
+	assert "I-ONE legacy nonvisual response compatibility." in patched
+	assert "str(key).lower()" in patched
+	assert "response_dict = normalized" in patched
+
+
 def test_extract_answer_prefers_named_final_answer():
 	result = {"session_results": {"debug": "short", "final_answer": "这是最终业务结论"}}
 	assert extract_answer(result, []) == "这是最终业务结论"
@@ -147,6 +174,35 @@ def test_nested_constellation_failure_overrides_completed_transport_status():
 	}
 	assert result_failed(result) is True
 	assert failure_message(result).startswith("任务执行失败：共尝试 6 个步骤，6 个失败。")
+
+
+def test_unsure_device_evaluation_overrides_completed_transport_task():
+	task = {
+		"status": "completed",
+		"result": {
+			"status": "completed",
+			"result": [
+				{"request": "Open WeChat", "result": ""},
+				{
+					"reason": "The execution trajectory is empty.",
+					"complete": "unsure",
+					"type": "evaluation_result",
+				},
+			],
+		},
+	}
+	assert task_execution_failed(task) is True
+
+
+def test_successful_device_evaluation_is_not_failed():
+	task = {
+		"status": "completed",
+		"result": {
+			"status": "completed",
+			"result": [{"complete": "yes", "type": "evaluation_result"}],
+		},
+	}
+	assert task_execution_failed(task) is False
 
 
 def test_raw_constellation_is_summarized_instead_of_returned():
