@@ -104,6 +104,16 @@ def patch_nonvisual_app_response() -> None:
 		AppLLMInteractionStrategy,
 	)
 
+	if not getattr(AppAgentResponse.model_validate, "_ione_nonvisual_compatible", False):
+		original_model_validate = AppAgentResponse.model_validate
+
+		@classmethod
+		def compatible_model_validate(cls, obj, *args, **kwargs):
+			return original_model_validate(normalize_app_response(obj), *args, **kwargs)
+
+		compatible_model_validate.__func__._ione_nonvisual_compatible = True
+		AppAgentResponse.model_validate = compatible_model_validate
+
 	if getattr(AppLLMInteractionStrategy._parse_app_response, "_ione_nonvisual_compatible", False):
 		return
 
@@ -618,6 +628,10 @@ class UFORuntime:
 			model=self.settings.qwen_model,
 		)
 		client = await self._ensure_client()
+		# Some UFO processors cache their strategy graph while Galaxy is initialized.
+		# Reapply the schema compatibility immediately before every request so both
+		# newly-created and cached AppAgent strategies accept non-visual responses.
+		patch_nonvisual_app_response()
 		client.session_name = f"ione_{run['session_id']}"
 		result = await client.process_request(build_prompt(run["request"], run["history"]))
 		elapsed = time.monotonic() - started_clock
