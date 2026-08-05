@@ -55,7 +55,7 @@ function Get-ModelApiBase([string]$ConnectionUrl) {
 function Write-UfoAgentConfig($Config) {
     $deviceToken = Get-QueryParameter $Config.connection_url "token"
     $agentCommon = [ordered]@{
-        VISUAL_MODE = $true
+        VISUAL_MODE = $false
         REASONING_MODEL = $false
         API_TYPE = "openai"
         API_BASE = $Config.model_api_base

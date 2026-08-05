@@ -50,7 +50,7 @@ def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = Non
 	)
 	ufo_agents = {
 		"HOST_AGENT": {
-			"VISUAL_MODE": True,
+			"VISUAL_MODE": False,
 			"REASONING_MODEL": False,
 			"API_TYPE": "openai",
 			"API_BASE": settings.openai_base_url,
@@ -60,7 +60,7 @@ def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = Non
 			"EXAMPLE_PROMPT": "ufo/prompts/examples/{mode}/host_agent_example.yaml",
 		},
 		"APP_AGENT": {
-			"VISUAL_MODE": True,
+			"VISUAL_MODE": False,
 			"REASONING_MODEL": False,
 			"API_TYPE": "openai",
 			"API_BASE": settings.openai_base_url,
