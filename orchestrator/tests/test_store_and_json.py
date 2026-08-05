@@ -22,6 +22,10 @@ def test_deepseek_extract_accepts_web_relay_reply():
 def test_deepseek_keeps_markdown_review_as_fallback_plan():
 	plans = DeepSeekClient._parse_review_content("## 跟进方案\n1. 核验公告与资质")
 	assert plans == [{"deepseek_plan": "## 跟进方案\n1. 核验公告与资质"}]
+	first = DeepSeekClient._conversation_key()
+	second = DeepSeekClient._conversation_key()
+	assert first.startswith("ione-agent-lead-")
+	assert first != second
 
 
 def test_search_queries_are_short_and_drop_all_region_and_slashes():

@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
 from typing import Any, ClassVar
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 
@@ -279,6 +280,10 @@ class DeepSeekClient:
 		content = (content or "").strip()
 		return [{"deepseek_plan": content}] if content else []
 
+	@staticmethod
+	def _conversation_key() -> str:
+		return f"ione-agent-lead-{uuid4().hex[:16]}"
+
 	def review(self, prompt: str) -> list[dict[str, Any]]:
 		if not self.settings.deepseek_token:
 			raise RuntimeError("DeepSeek review token is not configured")
@@ -287,7 +292,7 @@ class DeepSeekClient:
 			response = client.post(
 				f"{self.settings.deepseek_url}/jobs",
 				headers=headers,
-				json={"prompt": prompt, "conversationKey": "ione-agent-lead-review"},
+				json={"prompt": prompt, "conversationKey": self._conversation_key()},
 			)
 			response.raise_for_status()
 			job = self._job_payload(response.json())
