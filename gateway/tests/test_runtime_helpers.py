@@ -19,6 +19,7 @@ from app.runtime import (  # noqa: E402
 	heartbeat_client_type,
 	normalize_app_response,
 	patch_ufo_app_response_source,
+	patch_ufo_host_result_source,
 	patch_ufo_openai_runtime,
 	probe_websocket_server,
 	result_failed,
@@ -129,6 +130,31 @@ def test_ufo_device_server_source_accepts_legacy_nonvisual_response(tmp_path):
 	assert "response_dict = normalized" in patched
 
 
+def test_ufo_host_finish_comment_becomes_round_result(tmp_path):
+	path = (
+		tmp_path
+		/ "ufo"
+		/ "agents"
+		/ "processors"
+		/ "strategies"
+		/ "host_agent_processing_strategy.py"
+	)
+	path.parent.mkdir(parents=True)
+	path.write_text(
+		"            response_dict = host_agent.response_to_dict(response_text)\n\n"
+		"            # Create structured response object\n"
+		"            parsed_response = HostAgentResponse.model_validate(response_dict)\n",
+		encoding="utf-8",
+	)
+
+	patch_ufo_host_result_source(tmp_path)
+
+	patched = path.read_text(encoding="utf-8")
+	assert "I-ONE completed HostAgent result compatibility." in patched
+	assert 'status == "FINISH"' in patched
+	assert 'normalized["result"] = normalized.get("comment")' in patched
+
+
 def test_extract_answer_prefers_named_final_answer():
 	result = {"session_results": {"debug": "short", "final_answer": "这是最终业务结论"}}
 	assert extract_answer(result, []) == "这是最终业务结论"
@@ -202,6 +228,20 @@ def test_successful_device_evaluation_is_not_failed():
 		"result": {
 			"status": "completed",
 			"result": [{"complete": "yes", "type": "evaluation_result"}],
+		},
+	}
+	assert task_execution_failed(task) is False
+
+
+def test_completed_round_result_overrides_negative_screenshot_evaluation():
+	task = {
+		"status": "completed",
+		"result": {
+			"status": "completed",
+			"result": [
+				{"request": "Open WeChat", "result": "微信应用已打开。"},
+				{"complete": "no", "reason": "No screenshots", "type": "evaluation_result"},
+			],
 		},
 	}
 	assert task_execution_failed(task) is False

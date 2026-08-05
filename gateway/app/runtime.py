@@ -187,6 +187,41 @@ def patch_ufo_app_response_source(ufo_root: Path) -> None:
 	path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
 
 
+def patch_ufo_host_result_source(ufo_root: Path) -> None:
+	"""Preserve a finished HostAgent comment as the round's user-facing result."""
+	path = (
+		ufo_root
+		/ "ufo"
+		/ "agents"
+		/ "processors"
+		/ "strategies"
+		/ "host_agent_processing_strategy.py"
+	)
+	text = path.read_text(encoding="utf-8")
+	marker = "I-ONE completed HostAgent result compatibility."
+	if marker in text:
+		return
+	needle = (
+		"            response_dict = host_agent.response_to_dict(response_text)\n\n"
+		"            # Create structured response object\n"
+		"            parsed_response = HostAgentResponse.model_validate(response_dict)"
+	)
+	replacement = (
+		"            response_dict = host_agent.response_to_dict(response_text)\n\n"
+		"            # I-ONE completed HostAgent result compatibility.\n"
+		"            normalized = {str(key).lower(): value for key, value in response_dict.items()}\n"
+		"            status = str(normalized.get(\"status\") or \"\").strip().upper()\n"
+		"            if status == \"FINISH\" and not normalized.get(\"result\"):\n"
+		"                normalized[\"result\"] = normalized.get(\"comment\")\n"
+		"            response_dict = normalized\n\n"
+		"            # Create structured response object\n"
+		"            parsed_response = HostAgentResponse.model_validate(response_dict)"
+	)
+	if needle not in text:
+		raise RuntimeError("Unsupported UFO HostAgent response parser layout")
+	path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+
+
 def patch_ufo_openai_runtime(ufo_root: Path) -> None:
 	"""Bound Qwen output and disable hidden reasoning for desktop control calls.
 
@@ -229,6 +264,16 @@ def patch_ufo_openai_runtime(ufo_root: Path) -> None:
 
 def task_execution_failed(task_data: dict[str, Any]) -> bool:
 	"""Detect device-side failures hidden below a completed transport task."""
+	evaluation_states: list[str] = []
+	has_completed_result = False
+	result = task_data.get("result")
+	if isinstance(result, dict) and isinstance(result.get("result"), list):
+		for item in result["result"]:
+			if not isinstance(item, dict) or item.get("type") == "evaluation_result":
+				continue
+			if str(item.get("result") or "").strip():
+				has_completed_result = True
+				break
 	for path, value in _strings(task_data):
 		field = path.rsplit(".", 1)[-1].lower().rstrip("]")
 		state = value.lower()
@@ -237,8 +282,8 @@ def task_execution_failed(task_data: dict[str, Any]) -> bool:
 		if field in {"error", "exception"} and state not in {"none", "null"}:
 			return True
 		if field == "complete" and state in INCOMPLETE_EVALUATION_STATES:
-			return True
-	return False
+			evaluation_states.append(state)
+	return bool(evaluation_states) and not has_completed_result
 
 
 async def execute_single_device_task(client, request: str, device_id: str) -> dict[str, Any]:
@@ -323,6 +368,7 @@ def git_commit(repo: Path) -> str:
 
 def configure_ufo(settings: Settings, devices: list[dict[str, Any]] | None = None) -> None:
 	patch_ufo_app_response_source(settings.ufo_root)
+	patch_ufo_host_result_source(settings.ufo_root)
 	patch_ufo_openai_runtime(settings.ufo_root)
 	system_path = settings.ufo_root / "config" / "ufo" / "system.yaml"
 	system = yaml.safe_load(system_path.read_text(encoding="utf-8")) or {}
