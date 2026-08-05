@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.11
+
+- Send UFO desktop application heartbeats every 20 seconds through Cloudflare Tunnel.
+- Reapply the local heartbeat compatibility patch after each UFO main update.
+
 ## 0.2.10
 
 - Keep public desktop WebSockets active during long UFO planning and execution.

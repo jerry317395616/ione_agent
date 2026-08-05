@@ -49,7 +49,9 @@ def test_windows_installer_uses_text_download_and_explicit_acl_identity():
 	assert '"$($env:USERNAME):(R,W)"' in installer
 	assert '$PythonVersion = "3.10"' in installer
 	assert 'Replacing incompatible Python $ExistingVersion environment' in installer
-	assert 'client_version = "0.2.10"' in installer
+	assert 'client_version = "0.2.11"' in installer
+	assert 'timeout: float = 20,' in installer
+	assert '& $Git -C $UfoRoot checkout -- ufo/client/websocket.py' in installer
 
 
 def test_windows_launcher_trims_dpapi_ciphertext_before_decrypting():

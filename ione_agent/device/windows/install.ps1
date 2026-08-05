@@ -84,6 +84,24 @@ function Write-UfoAgentConfig($Config) {
     if ($LASTEXITCODE -ne 0) { throw "Unable to secure the UFO model configuration." }
 }
 
+function Set-UfoClientHeartbeat {
+    $webSocketClient = Join-Path $UfoRoot "ufo\client\websocket.py"
+    if (-not (Test-Path $webSocketClient)) {
+        throw "The UFO WebSocket client was not found."
+    }
+    $source = [IO.File]::ReadAllText($webSocketClient)
+    $updated = [regex]::Replace(
+        $source,
+        "timeout:\s*float\s*=\s*120,",
+        "timeout: float = 20,",
+        1
+    )
+    if ($updated -eq $source -and $source -notmatch "timeout:\s*float\s*=\s*20,") {
+        throw "The UFO heartbeat compatibility patch no longer matches main."
+    }
+    [IO.File]::WriteAllText($webSocketClient, $updated, (New-Object Text.UTF8Encoding($false)))
+}
+
 function Get-UvPath {
     $command = Get-Command uv.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -109,7 +127,7 @@ if (-not (Test-Path $ConfigPath)) {
         pairing_token = $PairingToken
         device_id = $DeviceId
         device_name = $env:COMPUTERNAME
-        client_version = "0.2.10"
+        client_version = "0.2.11"
     }
     Write-Host "Pairing this computer with I-ONE Agent..."
     $response = Invoke-RestMethod `
@@ -141,9 +159,12 @@ if (-not (Test-Path (Join-Path $UfoRoot ".git"))) {
     if ($LASTEXITCODE -ne 0) { throw "Unable to clone Microsoft UFO." }
 } else {
     Write-Host "Updating Microsoft UFO main branch..."
+    & $Git -C $UfoRoot checkout -- ufo/client/websocket.py
+    if ($LASTEXITCODE -ne 0) { throw "Unable to prepare UFO for update." }
     & $Git -C $UfoRoot pull --ff-only origin main
     if ($LASTEXITCODE -ne 0) { throw "Unable to update Microsoft UFO." }
 }
+Set-UfoClientHeartbeat
 
 $DeviceConfig = Read-DeviceConfig
 if (-not $DeviceConfig.model_api_base -or -not $DeviceConfig.model) {
