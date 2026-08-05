@@ -155,7 +155,7 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 			try:
 				upstream = await websockets.connect(upstream_url, max_size=None, open_timeout=10)
 				break
-			except TimeoutError:
+			except (TimeoutError, OSError):
 				if attempt:
 					raise
 				await runtime.restart_device_server()
@@ -190,7 +190,7 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 				task.result()
 		finally:
 			await upstream.close()
-	except (TimeoutError, WebSocketDisconnect, websockets.WebSocketException):
+	except (TimeoutError, OSError, WebSocketDisconnect, websockets.WebSocketException):
 		pass
 	finally:
 		device_store.set_status(device_id, "offline")
