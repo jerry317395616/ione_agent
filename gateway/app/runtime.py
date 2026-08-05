@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -265,19 +266,23 @@ class UFORuntime:
 				and self._port_open()
 			):
 				return
-			if self.device_server_process and self.device_server_process.returncode is None:
-				self.device_server_process.kill()
+			process = self.device_server_process
+			if process:
 				try:
-					await asyncio.wait_for(self.device_server_process.wait(), timeout=5)
+					os.kill(process.pid, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+				try:
+					await asyncio.wait_for(process.wait(), timeout=5)
 				except TimeoutError:
 					pass
-			self.device_server_process = None
 			for _ in range(50):
 				if not self._port_open():
 					break
 				await asyncio.sleep(0.1)
 			else:
 				raise RuntimeError("UFO device server did not stop")
+			self.device_server_process = None
 			await self._start_device_server()
 
 	def _port_open(self) -> bool:

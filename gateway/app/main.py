@@ -194,7 +194,7 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 				await asyncio.wait_for(upstream.close(), timeout=2)
 			except TimeoutError:
 				pass
-	except (TimeoutError, OSError, WebSocketDisconnect, websockets.WebSocketException):
+	except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect, websockets.WebSocketException):
 		pass
 	finally:
 		device_store.set_status(device_id, "offline")
