@@ -156,6 +156,15 @@ def attach_analysis(candidate) -> str:
 	return file_doc.file_url
 
 
+def _set_crm_field(lead, meta, fieldname: str, value: Any) -> None:
+	if value in (None, "") or not meta.has_field(fieldname):
+		return
+	field = meta.get_field(fieldname)
+	if field.fieldtype == "Link" and field.options and not frappe.db.exists(field.options, value):
+		return
+	lead.set(fieldname, value)
+
+
 @frappe.whitelist()
 def create_crm_lead(candidate_name: str, *, force: bool = False) -> str | None:
 	candidate = frappe.get_doc(CANDIDATE_DTYPE, candidate_name)
@@ -190,8 +199,7 @@ def create_crm_lead(candidate_name: str, *, force: bool = False) -> str | None:
 		"custom_ione_risk_level": candidate.risk_level,
 		"custom_ione_ai_status": "待人工核验",
 	}.items():
-		if value not in (None, "") and meta.has_field(fieldname):
-			lead.set(fieldname, value)
+		_set_crm_field(lead, meta, fieldname, value)
 	lead.insert(ignore_permissions=True)
 	attachment = attach_analysis(candidate)
 	if attachment:

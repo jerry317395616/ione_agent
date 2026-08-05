@@ -10,6 +10,7 @@ WINDOWS_LAUNCHER = APP_ROOT / "device" / "windows" / "launch.ps1"
 AGENT_TEMPLATE = APP_ROOT / "www" / "agent.html"
 AGENT_SCRIPT = APP_ROOT / "public" / "js" / "agent.js"
 AGENT_API = APP_ROOT / "api.py"
+LEAD_SERVICE = APP_ROOT / "lead_service.py"
 
 
 def _schemas():
@@ -86,3 +87,10 @@ def test_completed_lead_runs_can_resume_an_incomplete_frappe_sync():
 	assert "def _run_needs_poll(doc)" in api
 	assert "task_status not in TERMINAL_DISCOVERY_STATUSES" in api
 	assert "if _run_needs_poll(doc) and doc.gateway_run_id:" in api
+
+
+def test_crm_conversion_skips_missing_link_master_data():
+	service = LEAD_SERVICE.read_text(encoding="utf-8")
+	assert 'field.fieldtype == "Link"' in service
+	assert "frappe.db.exists(field.options, value)" in service
+	assert "_set_crm_field(lead, meta, fieldname, value)" in service
