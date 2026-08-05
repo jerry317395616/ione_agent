@@ -26,6 +26,10 @@ def test_deepseek_keeps_markdown_review_as_fallback_plan():
 	second = DeepSeekClient._conversation_key()
 	assert first.startswith("ione-agent-lead-")
 	assert first != second
+	parsed = DeepSeekClient._parse_review_content(
+		'[{"fingerprint":"abc","deepseek_plan":["核验公告", "准备资质"]}]'
+	)
+	assert parsed[0]["deepseek_plan"] == "- 核验公告\n- 准备资质"
 
 
 def test_search_queries_are_short_and_drop_all_region_and_slashes():

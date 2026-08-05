@@ -271,12 +271,37 @@ class DeepSeekClient:
 		return payload if isinstance(payload, dict) else {}
 
 	@staticmethod
+	def _plan_text(value: Any) -> str:
+		if value in (None, ""):
+			return ""
+		if isinstance(value, str):
+			return value.strip()
+		if isinstance(value, list):
+			lines = []
+			for item in value:
+				text = item.strip() if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
+				if text:
+					lines.append(f"- {text}")
+			return "\n".join(lines)
+		if isinstance(value, dict):
+			return json.dumps(value, ensure_ascii=False, indent=2)
+		return str(value).strip()
+
+	@staticmethod
 	def _parse_review_content(content: str) -> list[dict[str, Any]]:
 		parsed = parse_json(content, [])
 		if isinstance(parsed, dict):
 			parsed = parsed.get("plans") or parsed.get("results") or []
 		if isinstance(parsed, list) and parsed:
-			return [item for item in parsed if isinstance(item, dict)]
+			plans = []
+			for item in parsed:
+				if not isinstance(item, dict):
+					continue
+				normalized = dict(item)
+				if "deepseek_plan" in normalized:
+					normalized["deepseek_plan"] = DeepSeekClient._plan_text(normalized["deepseek_plan"])
+				plans.append(normalized)
+			return plans
 		content = (content or "").strip()
 		return [{"deepseek_plan": content}] if content else []
 
