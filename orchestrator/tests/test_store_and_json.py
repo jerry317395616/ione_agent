@@ -13,6 +13,10 @@ def test_parse_json_accepts_fenced_payload():
 
 def test_deepseek_extract_accepts_web_relay_reply():
 	assert DeepSeekClient._extract({"status": "completed", "reply": "[{\"fingerprint\": \"abc\"}]"}) == '[{"fingerprint": "abc"}]'
+	assert DeepSeekClient._job_payload({"ok": True, "job": {"id": "job-1", "status": "queued"}}) == {
+		"id": "job-1",
+		"status": "queued",
+	}
 
 
 def test_deepseek_keeps_markdown_review_as_fallback_plan():

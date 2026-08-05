@@ -264,6 +264,12 @@ class DeepSeekClient:
 		return ""
 
 	@staticmethod
+	def _job_payload(payload: Any) -> dict[str, Any]:
+		if isinstance(payload, dict) and isinstance(payload.get("job"), dict):
+			return payload["job"]
+		return payload if isinstance(payload, dict) else {}
+
+	@staticmethod
 	def _parse_review_content(content: str) -> list[dict[str, Any]]:
 		parsed = parse_json(content, [])
 		if isinstance(parsed, dict):
@@ -284,7 +290,7 @@ class DeepSeekClient:
 				json={"prompt": prompt, "conversationKey": "ione-agent-lead-review"},
 			)
 			response.raise_for_status()
-			job = response.json()
+			job = self._job_payload(response.json())
 			job_id = job.get("id") or job.get("jobId") or job.get("job_id")
 			if not job_id:
 				content = self._extract(job)
@@ -293,7 +299,7 @@ class DeepSeekClient:
 			while time.monotonic() < deadline:
 				status = client.get(f"{self.settings.deepseek_url}/jobs/{job_id}", headers=headers)
 				status.raise_for_status()
-				payload = status.json()
+				payload = self._job_payload(status.json())
 				state = str(payload.get("status") or "").lower()
 				if state in {"failed", "error", "cancelled"}:
 					raise RuntimeError(self._extract(payload) or f"DeepSeek job {state}")
