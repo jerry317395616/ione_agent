@@ -6,6 +6,7 @@ from pathlib import Path
 APP_ROOT = Path(__file__).resolve().parents[1]
 DOCTYPE_ROOT = APP_ROOT / "i_one_agent" / "doctype"
 WINDOWS_INSTALLER = APP_ROOT / "device" / "windows" / "install.ps1"
+WINDOWS_LAUNCHER = APP_ROOT / "device" / "windows" / "launch.ps1"
 
 
 def _schemas():
@@ -44,4 +45,9 @@ def test_windows_installer_uses_text_download_and_explicit_acl_identity():
 	assert 'Invoke-RestMethod "https://astral.sh/uv/install.ps1"' in installer
 	assert 'Invoke-Expression ([string]$installer)' in installer
 	assert '"$($env:USERNAME):(R,W)"' in installer
-	assert 'client_version = "0.2.1"' in installer
+	assert 'client_version = "0.2.2"' in installer
+
+
+def test_windows_launcher_trims_dpapi_ciphertext_before_decrypting():
+	launcher = WINDOWS_LAUNCHER.read_text(encoding="utf-8")
+	assert '(Get-Content -Raw $ConfigPath).Trim()' in launcher

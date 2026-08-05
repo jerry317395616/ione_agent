@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Trim the DPAPI ciphertext before loading the Windows device configuration.
+
 ## 0.2.1
 
 - Fix Windows PowerShell 5 compatibility when downloading the uv installer.

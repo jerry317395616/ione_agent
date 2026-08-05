@@ -6,7 +6,8 @@ $ConfigPath = Join-Path $Root "device.config"
 $LogRoot = Join-Path $Root "logs"
 
 function Read-DeviceConfig {
-    $secure = Get-Content -Raw $ConfigPath | ConvertTo-SecureString
+    $encrypted = (Get-Content -Raw $ConfigPath).Trim()
+    $secure = ConvertTo-SecureString $encrypted
     $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
     try {
         return ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) | ConvertFrom-Json)
