@@ -32,7 +32,7 @@ WINDOWS_EXECUTION_GUIDANCE = (
 
 FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
 DEVICE_KEEPALIVE_INTERVAL_SECONDS = 20
-UFO_MAX_TOKENS = 800
+UFO_MAX_TOKENS = 512
 
 
 def device_heartbeat_message() -> str:
@@ -151,9 +151,76 @@ def patch_ufo_openai_runtime(ufo_root: Path) -> None:
 		if needle not in text:
 			raise RuntimeError("Unsupported UFO OpenAI client layout")
 		text = text.replace(needle, replacement, 1)
+	# UFO omits every generation limit for models marked as reasoning models.
+	# Qwen thinking is disabled above, so keep the output bound in both branches.
+	reasoning_needle = (
+		'            # Add generation parameters for non-reasoning models\n'
+		'            if not self.config_llm.get("REASONING_MODEL", False):'
+	)
+	reasoning_replacement = (
+		'            # Always bound output; temperature and top-p remain optional for reasoning models.\n'
+		'            base_params["max_tokens"] = max_tokens\n'
+		'            if not self.config_llm.get("REASONING_MODEL", False):'
+	)
+	if 'base_params["max_tokens"] = max_tokens' not in text:
+		if reasoning_needle not in text:
+			raise RuntimeError("Unsupported UFO generation parameter layout")
+		text = text.replace(reasoning_needle, reasoning_replacement, 1)
 	if '"max_tokens": max_tokens,' not in text:
 		raise RuntimeError("Unable to enable UFO max_tokens")
 	path.write_text(text, encoding="utf-8")
+
+
+async def execute_single_device_task(client, request: str, device_id: str) -> dict[str, Any]:
+	"""Execute a desktop request as one UFO task when only one device is paired.
+
+	Galaxy's constellation planning is valuable for multi-device DAGs, but it adds a
+	second LLM pass to every one-computer desktop action. A direct one-task
+	constellation still uses UFO's device transport and AppAgent while avoiding the
+	internal constellation JSON that should never become a user-facing response.
+	"""
+	from galaxy.constellation import TaskConstellation, TaskConstellationOrchestrator
+	from galaxy.constellation.enums import DeviceType, TaskPriority
+	from galaxy.constellation.task_star import TaskStar
+
+	constellation = TaskConstellation(name="I-ONE desktop task")
+	task = TaskStar(
+		task_id="task-1",
+		name=request.replace("\n", " ")[:80] or "Desktop task",
+		description=f"{WINDOWS_EXECUTION_GUIDANCE}\n\nUser task: {request}",
+		tips=[
+			"Use the connected Windows desktop and complete the requested operation through UFO UI automation.",
+			"Return a concise execution result and never expose internal JSON or reasoning.",
+		],
+		target_device_id=device_id,
+		device_type=DeviceType.WINDOWS,
+		priority=TaskPriority.HIGH,
+		timeout=600,
+		retry_count=1,
+	)
+	constellation.add_task(task)
+	orchestrator = TaskConstellationOrchestrator(
+		device_manager=client._client.device_manager,
+		enable_logging=True,
+	)
+	result = await orchestrator.orchestrate_constellation(
+		constellation,
+		device_assignments={task.task_id: device_id},
+	)
+	constellation_data = constellation.to_dict()
+	task_data = constellation_data.get("tasks", {}).get(task.task_id, {})
+	task_status = str(task_data.get("status") or "").strip().lower()
+	failed = task_status in FAILED_RESULT_STATES
+	answer = "" if failed else f"已在连接的电脑上完成操作：{request}。"
+	return {
+		"status": "failed" if failed else result.get("status", "completed"),
+		"constellation": constellation_data,
+		"session_results": {
+			"status": "failed" if failed else "completed",
+			"final_constellation_stats": constellation.get_statistics(),
+			"final_results": [{"summary": answer}] if answer else [],
+		},
+	}
 
 
 def probe_websocket_server(host: str, port: int, path: str, timeout: float = 5) -> bool:
@@ -661,7 +728,16 @@ class UFORuntime:
 		# newly-created and cached AppAgent strategies accept non-visual responses.
 		patch_nonvisual_app_response()
 		client.session_name = f"ione_{run['session_id']}"
-		result = await client.process_request(build_prompt(run["request"], run["history"]))
+		active_devices = self.device_store.active() if self.device_store else []
+		if len(active_devices) == 1 and str(active_devices[0].get("platform", "")).lower() == "windows":
+			self.store.update(run_id, current_stage="正在连接 Windows 执行设备", progress=8)
+			result = await execute_single_device_task(
+				client,
+				run["request"],
+				active_devices[0]["device_id"],
+			)
+		else:
+			result = await client.process_request(build_prompt(run["request"], run["history"]))
 		elapsed = time.monotonic() - started_clock
 		latest = self.store.get(run_id)
 		if latest["stop_requested"] or result.get("status") == "stopped":

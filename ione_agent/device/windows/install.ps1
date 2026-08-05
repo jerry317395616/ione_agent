@@ -235,11 +235,24 @@ function Set-UfoOpenAiLimits {
     if ($source -notmatch '"max_tokens": max_tokens,') {
         throw "The UFO max_tokens compatibility patch no longer matches main."
     }
+    if ($source -notmatch 'base_params\["max_tokens"\] = max_tokens') {
+        $pattern = '(?m)^            # Add generation parameters for non-reasoning models\r?\n            if not self\.config_llm\.get\("REASONING_MODEL", False\):'
+        $replacement = @'
+            # Always bound output; temperature and top-p remain optional for reasoning models.
+            base_params["max_tokens"] = max_tokens
+            if not self.config_llm.get("REASONING_MODEL", False):
+'@
+        $updated = [regex]::Replace($source, $pattern, $replacement, 1)
+        if ($updated -eq $source) {
+            throw "The UFO reasoning model token limit patch no longer matches main."
+        }
+        $source = $updated
+    }
     [IO.File]::WriteAllText($openAiPath, $source, (New-Object Text.UTF8Encoding($false)))
 
     $systemPath = Join-Path $UfoRoot "config\ufo\system.yaml"
     $system = [IO.File]::ReadAllText($systemPath)
-    $system = [regex]::Replace($system, '(?m)^MAX_TOKENS:\s*\d+', 'MAX_TOKENS: 800', 1)
+    $system = [regex]::Replace($system, '(?m)^MAX_TOKENS:\s*\d+', 'MAX_TOKENS: 512', 1)
     [IO.File]::WriteAllText($systemPath, $system, (New-Object Text.UTF8Encoding($false)))
 }
 

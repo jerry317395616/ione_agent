@@ -84,7 +84,10 @@ def test_ufo_openai_runtime_limits_qwen_generation(tmp_path):
 	path.parent.mkdir(parents=True)
 	path.write_text(
 		'base_params = {\n                "n": 1,\n                **kwargs,\n'
-		'                # "max_tokens": max_tokens,\n}\n',
+		'                # "max_tokens": max_tokens,\n}\n'
+		'            # Add generation parameters for non-reasoning models\n'
+		'            if not self.config_llm.get("REASONING_MODEL", False):\n'
+		'                pass\n',
 		encoding="utf-8",
 	)
 
@@ -92,8 +95,9 @@ def test_ufo_openai_runtime_limits_qwen_generation(tmp_path):
 
 	patched = path.read_text(encoding="utf-8")
 	assert '"max_tokens": max_tokens,' in patched
+	assert 'base_params["max_tokens"] = max_tokens' in patched
 	assert '"enable_thinking": False' in patched
-	assert UFO_MAX_TOKENS == 800
+	assert UFO_MAX_TOKENS == 512
 
 
 def test_extract_answer_prefers_named_final_answer():
