@@ -53,7 +53,7 @@ def test_windows_installer_uses_text_download_and_explicit_acl_identity():
 	assert '"$($env:USERNAME):(R,W)"' in installer
 	assert '$PythonVersion = "3.10"' in installer
 	assert 'Replacing incompatible Python $ExistingVersion environment' in installer
-	assert 'client_version = "0.2.13"' in installer
+	assert 'client_version = "0.2.14"' in installer
 	assert 'timeout: float = 20,' in installer
 	assert "Set-UfoWindowFocusFallback" in installer
 	assert 'win32gui.SetForegroundWindow(handle)' in installer

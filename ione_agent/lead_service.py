@@ -4,8 +4,10 @@ import json
 from typing import Any
 
 import frappe
-from frappe.utils import cint, flt, get_datetime, now_datetime
+from frappe.utils import cint, flt, now_datetime
 from frappe.utils.file_manager import save_file
+
+from ione_agent.temporal import normalize_datetime
 
 PROFILE_DTYPE = "I-ONE Lead Discovery Profile"
 SOURCE_DTYPE = "I-ONE Lead Source"
@@ -94,8 +96,8 @@ def _candidate_values(task, item: dict[str, Any]) -> dict[str, Any]:
 		"procurement_method": item.get("procurement_method"),
 		"purchaser": item.get("purchaser"),
 		"agency": item.get("agency"),
-		"published_at": item.get("published_at"),
-		"deadline": item.get("deadline"),
+		"published_at": normalize_datetime(item.get("published_at")),
+		"deadline": normalize_datetime(item.get("deadline")),
 		"budget": flt(item.get("budget")),
 		"contact_name": item.get("contact_name"),
 		"contact_phone": item.get("contact_phone"),
@@ -237,9 +239,9 @@ def sync_task(task_name: str, payload: dict[str, Any]) -> None:
 	task.hermes_status = components.get("hermes") or task.hermes_status
 	task.deepseek_status = components.get("deepseek") or task.deepseek_status
 	if payload.get("started_at"):
-		task.started_at = get_datetime(payload["started_at"]).replace(tzinfo=None)
+		task.started_at = normalize_datetime(payload["started_at"])
 	if payload.get("completed_at"):
-		task.completed_at = get_datetime(payload["completed_at"]).replace(tzinfo=None)
+		task.completed_at = normalize_datetime(payload["completed_at"])
 	result = payload.get("result") or {}
 	if result.get("criteria"):
 		task.criteria_json = json.dumps(result["criteria"], ensure_ascii=False, indent=2)
