@@ -57,12 +57,22 @@ def test_workflow_produces_traceable_candidate(tmp_path: Path):
 		def research(self, prompt):
 			return [{"title": "医院信息化建设项目", "source_url": "https://example.test/tender/1"}]
 
+	class FakeSearxng:
+		def search(self, queries, *, limit):
+			return [{"title": "医院信息化建设项目", "source_url": "https://example.test/tender/1"}]
+
+	class FakeExtractor:
+		def enrich(self, results, *, limit):
+			return results
+
 	class FakeDeepSeek:
 		def review(self, prompt):
 			return []
 
 	workflow.qwen = FakeQwen()
 	workflow.hermes = FakeHermes()
+	workflow.searxng = FakeSearxng()
+	workflow.extractor = FakeExtractor()
 	workflow.deepseek = FakeDeepSeek()
 	state = workflow.run(run["run_id"], run["payload"])
 	assert state["criteria"]["industry"] == "医疗"

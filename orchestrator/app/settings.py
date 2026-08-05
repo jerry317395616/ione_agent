@@ -25,6 +25,7 @@ class Settings:
 	deepseek_url: str
 	deepseek_token: str
 	max_concurrent_runs: int
+	search_http_proxy: str = ""
 
 	@classmethod
 	def from_environment(cls) -> Settings:
@@ -42,6 +43,7 @@ class Settings:
 			deepseek_url=os.getenv("DEEPSEEK_REVIEW_URL", "http://127.0.0.1:9474").strip().rstrip("/"),
 			deepseek_token=os.getenv("DEEPSEEK_REVIEW_TOKEN", "").strip(),
 			max_concurrent_runs=max(1, min(8, int(os.getenv("IONE_MAX_CONCURRENT_RUNS", "2")))),
+			search_http_proxy=os.getenv("SEARCH_HTTP_PROXY", "").strip(),
 		)
 
 	@property

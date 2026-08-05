@@ -5,11 +5,12 @@ import json
 import sqlite3
 from datetime import date
 from typing import Any, TypedDict
+from urllib.parse import urlparse
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from app.clients import DeepSeekClient, HermesClient, QwenClient, SearxngClient
+from app.clients import DeepSeekClient, HermesClient, QwenClient, SearxngClient, WebPageExtractor
 from app.settings import Settings
 from app.store import RunStore
 
@@ -37,6 +38,7 @@ class LeadWorkflow:
 		self.qwen = QwenClient(settings)
 		self.hermes = HermesClient(settings)
 		self.searxng = SearxngClient(settings)
+		self.extractor = WebPageExtractor(settings)
 		self.deepseek = DeepSeekClient(settings)
 		builder = StateGraph(LeadState)
 		builder.add_node("parse", self.parse_criteria)
@@ -99,33 +101,66 @@ class LeadWorkflow:
 		run_id = state["run_id"]
 		self.ensure_running(run_id)
 		criteria = state["criteria"]
-		self.store.stage(run_id, "researching", 30, "Hermes 正在检索并核验近期公开招标信息", hermes="正在调研", qwen="已完成")
+		self.store.stage(run_id, "researching", 30, "正在检索近期公开招标信息", hermes="等待核验", qwen="已完成")
 		sources = state.get("sources") or []
+		industry = criteria.get("industry") or state["request"]
+		regions = criteria.get("regions") or [""]
+		keywords = criteria.get("keywords") or ["招标", "采购"]
+		queries: list[str] = []
+		for region in regions[:6]:
+			for keyword in keywords[:8]:
+				queries.append(f"{region} {industry} {keyword} 招标 采购 公告".strip())
+		for source in sources[:8]:
+			domain = urlparse(str(source.get("base_url") or "")).hostname
+			if domain:
+				queries.append(f"site:{domain} {industry} 招标 采购 公告")
+		search_limit = min(80, max(20, int(criteria["maximum_results"]) * 3))
+		raw = self.searxng.search(queries, limit=search_limit)
+		self.store.stage(
+			run_id,
+			"researching",
+			38,
+			f"已发现 {len(raw)} 条公开信息，正在抓取原文证据",
+			hermes="等待核验",
+		)
+		raw = self.extractor.enrich(raw, limit=min(12, int(criteria["maximum_results"])))
+		self.ensure_running(run_id)
 		prompt = (
-			"你是 I-ONE 行业情报研究员。联网检索近期真实、仍有业务价值的招标/采购公告。"
-			"优先官方来源，逐条核对原文，不得编造项目、预算、联系人或网址。"
+			"你是 I-ONE 行业情报研究员。以下素材已由受控采集器联网搜索并抓取原文。"
+			"禁止继续调用搜索、浏览器、终端或其他工具，只能根据给定素材完成核验和整理。"
+			"优先保留官方来源，不得编造项目、预算、联系人或网址。"
 			"只返回 JSON 数组。每项字段：title,project_number,purchaser,agency,contact_name,"
 			"contact_phone,contact_email,source_name,source_url,published_at,deadline,budget,region,"
 			"industry,procurement_method,raw_text,evidence。evidence 是包含 url、snippet 的数组。\n"
 			f"任务：{state['request']}\n条件：{json.dumps(criteria, ensure_ascii=False)}\n"
-			f"优先来源：{json.dumps(sources, ensure_ascii=False)}"
+			f"优先来源：{json.dumps(sources, ensure_ascii=False)}\n"
+			f"已采集素材：{json.dumps(raw[:12], ensure_ascii=False)}"
 		)
 		partial = False
-		try:
-			raw = self.hermes.research(prompt)
-		except Exception:
+		if raw:
+			self.store.stage(run_id, "researching", 48, "Hermes 正在核验来源并整理招标事实", hermes="正在核验")
+			try:
+				researched = self.hermes.research(prompt)
+				if researched:
+					by_url = {str(item.get("source_url") or ""): item for item in raw}
+					merged = []
+					for item in researched:
+						url = str(item.get("source_url") or "")
+						base = by_url.get(url, {})
+						merged.append({**base, **item, "evidence": item.get("evidence") or base.get("evidence") or []})
+					raw = merged
+				else:
+					partial = True
+			except Exception:
+				partial = True
+		else:
 			partial = True
-			industry = criteria.get("industry") or state["request"]
-			regions = criteria.get("regions") or [""]
-			keywords = criteria.get("keywords") or ["招标", "采购"]
-			queries = [f"{region} {industry} {keyword} 招标 采购".strip() for region in regions for keyword in keywords]
-			raw = self.searxng.search(queries, limit=criteria["maximum_results"])
 		self.store.stage(
 			run_id,
 			"researching",
-			45,
+			52,
 			f"已获取 {len(raw)} 条公开信息，准备结构化分析",
-			hermes="已完成" if not partial else "降级为搜索引擎",
+			hermes="已完成" if not partial else "已保留采集结果，等待人工复核",
 		)
 		return {"raw_candidates": raw[: criteria["maximum_results"]], "partial": partial}
 
