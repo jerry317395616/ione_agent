@@ -173,6 +173,7 @@ class UFORuntime:
 		self.current_run_id: str | None = None
 		self.worker_task: asyncio.Task | None = None
 		self.device_server_process: asyncio.subprocess.Process | None = None
+		self.device_server_lock = asyncio.Lock()
 		self.devices_dirty = False
 		self.observer_subscribed = False
 		self.observer = StoreObserver(store)
@@ -253,6 +254,22 @@ class UFORuntime:
 				return
 			await asyncio.sleep(0.25)
 		raise RuntimeError("UFO device server did not become ready")
+
+	async def restart_device_server(self) -> None:
+		async with self.device_server_lock:
+			if self.device_server_process and self.device_server_process.returncode is None:
+				self.device_server_process.terminate()
+				try:
+					await asyncio.wait_for(self.device_server_process.wait(), timeout=8)
+				except TimeoutError:
+					self.device_server_process.kill()
+					await self.device_server_process.wait()
+			self.device_server_process = None
+			for _ in range(20):
+				if not self._port_open():
+					break
+				await asyncio.sleep(0.1)
+			await self._start_device_server()
 
 	def _port_open(self) -> bool:
 		try:

@@ -11,6 +11,7 @@ import websockets
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
+from starlette.websockets import WebSocketState
 
 from app.device_store import DeviceStore
 from app.models import CreateRunRequest, RegisterDeviceRequest
@@ -149,7 +150,19 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 		f"?token={quote(settings.device_server_api_key)}"
 	)
 	try:
-		async with websockets.connect(upstream_url, max_size=None) as upstream:
+		upstream = None
+		for attempt in range(2):
+			try:
+				upstream = await websockets.connect(upstream_url, max_size=None, open_timeout=10)
+				break
+			except TimeoutError:
+				if attempt:
+					raise
+				await runtime.restart_device_server()
+		if upstream is None:
+			raise RuntimeError("Unable to connect to the UFO device server")
+
+		try:
 			device_store.set_status(device_id, "online")
 
 			async def to_upstream() -> None:
@@ -175,10 +188,14 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 				task.cancel()
 			for task in done:
 				task.result()
-	except (WebSocketDisconnect, websockets.WebSocketException):
+		finally:
+			await upstream.close()
+	except (TimeoutError, WebSocketDisconnect, websockets.WebSocketException):
 		pass
 	finally:
 		device_store.set_status(device_id, "offline")
+		if websocket.client_state != WebSocketState.DISCONNECTED:
+			await websocket.close(code=1013, reason="Device service is restarting")
 
 
 @app.post("/v1/runs", dependencies=[Depends(authorize)])
