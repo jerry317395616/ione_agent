@@ -102,6 +102,38 @@ function Set-UfoClientHeartbeat {
     [IO.File]::WriteAllText($webSocketClient, $updated, (New-Object Text.UTF8Encoding($false)))
 }
 
+function Set-UfoWindowFocusFallback {
+    $uiServer = Join-Path $UfoRoot "ufo\client\mcp\local_servers\ui_mcp_server.py"
+    if (-not (Test-Path $uiServer)) {
+        throw "The UFO UI server was not found."
+    }
+    $source = [IO.File]::ReadAllText($uiServer)
+    if ($source -match "except Exception as focus_error:") {
+        return
+    }
+    $pattern = '(?m)^        except Exception as e:\r?\n            raise ToolError\(f"Failed to set focus on window: \{str\(e\)\}"\)'
+    $replacement = @'
+        except Exception as focus_error:
+            try:
+                import win32con
+                import win32gui
+
+                handle = window.handle
+                win32gui.ShowWindow(handle, win32con.SW_RESTORE)
+                win32gui.BringWindowToTop(handle)
+                win32gui.SetForegroundWindow(handle)
+            except Exception as fallback_error:
+                raise ToolError(
+                    f"Failed to set focus on window: {focus_error}; fallback failed: {fallback_error}"
+                ) from fallback_error
+'@
+    $updated = [regex]::Replace($source, $pattern, $replacement, 1)
+    if ($updated -eq $source) {
+        throw "The UFO window-focus compatibility patch no longer matches main."
+    }
+    [IO.File]::WriteAllText($uiServer, $updated, (New-Object Text.UTF8Encoding($false)))
+}
+
 function Get-UvPath {
     $command = Get-Command uv.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -127,7 +159,7 @@ if (-not (Test-Path $ConfigPath)) {
         pairing_token = $PairingToken
         device_id = $DeviceId
         device_name = $env:COMPUTERNAME
-        client_version = "0.2.12"
+        client_version = "0.2.13"
     }
     Write-Host "Pairing this computer with I-ONE Agent..."
     $response = Invoke-RestMethod `
@@ -159,12 +191,13 @@ if (-not (Test-Path (Join-Path $UfoRoot ".git"))) {
     if ($LASTEXITCODE -ne 0) { throw "Unable to clone Microsoft UFO." }
 } else {
     Write-Host "Updating Microsoft UFO main branch..."
-    & $Git -C $UfoRoot checkout -- ufo/client/websocket.py
+    & $Git -C $UfoRoot checkout -- ufo/client/websocket.py ufo/client/mcp/local_servers/ui_mcp_server.py
     if ($LASTEXITCODE -ne 0) { throw "Unable to prepare UFO for update." }
     & $Git -C $UfoRoot pull --ff-only origin main
     if ($LASTEXITCODE -ne 0) { throw "Unable to update Microsoft UFO." }
 }
 Set-UfoClientHeartbeat
+Set-UfoWindowFocusFallback
 
 $DeviceConfig = Read-DeviceConfig
 if (-not $DeviceConfig.model_api_base -or -not $DeviceConfig.model) {

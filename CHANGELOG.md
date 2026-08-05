@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.13
+
+- Fall back to Win32 window restoration and focus when UFO's standard UI focus call fails.
+
 ## 0.2.12
 
 - Allow long blocking desktop actions without triggering Uvicorn's short WebSocket ping timeout.
