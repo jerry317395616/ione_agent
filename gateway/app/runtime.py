@@ -406,8 +406,8 @@ class UFORuntime:
 			"WARNING",
 			cwd=self.settings.ufo_root,
 			env=environment,
-			stdout=asyncio.subprocess.DEVNULL,
-			stderr=asyncio.subprocess.DEVNULL,
+			stdout=None,
+			stderr=None,
 		)
 		for _ in range(40):
 			if self.device_server_process.returncode is not None:

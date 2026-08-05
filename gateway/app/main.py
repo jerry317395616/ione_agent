@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -25,6 +26,7 @@ settings.data_dir.mkdir(parents=True, exist_ok=True)
 store = RunStore(settings.data_dir / "runs.sqlite3")
 device_store = DeviceStore(settings.data_dir / "devices.sqlite3")
 runtime = UFORuntime(settings, store, device_store)
+logger = logging.getLogger("ione_agent.device_proxy")
 
 
 def schedule_gateway_restart() -> None:
@@ -203,8 +205,19 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 					else:
 						await websocket.send_text(message)
 
-			tasks = [asyncio.create_task(to_upstream()), asyncio.create_task(to_device())]
+			tasks = [
+				asyncio.create_task(to_upstream(), name="device-to-ufo"),
+				asyncio.create_task(to_device(), name="ufo-to-device"),
+			]
 			done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+			for task in done:
+				if task.cancelled():
+					reason = "cancelled"
+				elif error := task.exception():
+					reason = f"{type(error).__name__}: {error}"
+				else:
+					reason = "connection ended"
+				logger.warning("Device proxy %s ended for %s: %s", task.get_name(), device_id, reason)
 			for task in pending:
 				task.cancel()
 			for task in done:
@@ -214,8 +227,8 @@ async def device_websocket(websocket: WebSocket, device_id: str, token: str) -> 
 				await asyncio.wait_for(upstream.close(), timeout=2)
 			except TimeoutError:
 				pass
-	except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect, websockets.WebSocketException):
-		pass
+	except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect, websockets.WebSocketException) as exc:
+		logger.warning("Device proxy closed for %s: %s: %s", device_id, type(exc).__name__, exc)
 	finally:
 		device_store.set_status(device_id, "offline")
 		if websocket.client_state != WebSocketState.DISCONNECTED:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9
+
+- Record which side closes a desktop-device proxy connection.
+- Preserve UFO device-server warnings in gateway diagnostics.
+
 ## 0.2.8
 
 - Keep the local UFO device proxy alive during long model-planning calls.
