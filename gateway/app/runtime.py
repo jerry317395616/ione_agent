@@ -277,10 +277,13 @@ class UFORuntime:
 		await asyncio.sleep(15)
 		while True:
 			try:
-				connection = await websockets.connect(
-					upstream_url,
-					open_timeout=10,
-					close_timeout=1,
+				connection = await asyncio.wait_for(
+					websockets.connect(
+						upstream_url,
+						open_timeout=10,
+						close_timeout=1,
+					),
+					timeout=12,
 				)
 			except asyncio.CancelledError:
 				raise
