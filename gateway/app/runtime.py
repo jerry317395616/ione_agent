@@ -266,7 +266,7 @@ class UFORuntime:
 			if self._port_open():
 				return
 			await asyncio.sleep(0.25)
-			raise RuntimeError("UFO device server did not become ready")
+		raise RuntimeError("UFO device server did not become ready")
 
 	async def _watch_device_server(self) -> None:
 		upstream_url = (
@@ -281,11 +281,14 @@ class UFORuntime:
 					open_timeout=10,
 					close_timeout=1,
 				)
-				await connection.close()
 			except asyncio.CancelledError:
 				raise
 			except (TimeoutError, OSError, websockets.WebSocketException):
 				os._exit(75)
+			try:
+				await connection.close()
+			except (TimeoutError, OSError, websockets.WebSocketException):
+				pass
 			await asyncio.sleep(30)
 
 	async def restart_device_server(
