@@ -33,6 +33,7 @@ WINDOWS_EXECUTION_GUIDANCE = (
 FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
 INCOMPLETE_EVALUATION_STATES = {"false", "incomplete", "no", "unknown", "unsure"}
 DEVICE_KEEPALIVE_INTERVAL_SECONDS = 20
+DEVICE_SERVER_MAX_FAILED_CHECKS = 3
 UFO_MAX_TOKENS = 512
 
 
@@ -42,6 +43,11 @@ def device_heartbeat_message() -> str:
 
 def heartbeat_client_type(client_id: str) -> str:
 	return "constellation" if "@" in client_id else "device"
+
+
+def should_restart_device_server(active_run_id: str | None, failed_checks: int) -> bool:
+	"""Restart only while idle and after several consecutive failed probes."""
+	return active_run_id is None and failed_checks >= DEVICE_SERVER_MAX_FAILED_CHECKS
 
 
 def patch_constellation_heartbeat() -> None:
@@ -645,14 +651,21 @@ class UFORuntime:
 		path = f"/ws?token={quote(self.settings.device_server_api_key)}"
 		if self.device_server_watchdog_stop.wait(15):
 			return
+		failed_checks = 0
 		while not self.device_server_watchdog_stop.is_set():
-			if not probe_websocket_server(
+			if self.current_run_id is not None:
+				failed_checks = 0
+			elif probe_websocket_server(
 				self.settings.device_server_host,
 				self.settings.device_server_port,
 				path,
 			):
-				os._exit(75)
-			self.device_server_watchdog_checks += 1
+				failed_checks = 0
+				self.device_server_watchdog_checks += 1
+			else:
+				failed_checks += 1
+				if should_restart_device_server(self.current_run_id, failed_checks):
+					os._exit(75)
 			if self.device_server_watchdog_stop.wait(30):
 				return
 

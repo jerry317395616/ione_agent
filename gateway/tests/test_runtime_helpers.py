@@ -9,6 +9,7 @@ sys.path.insert(0, str(GATEWAY_ROOT))
 
 from app.runtime import (  # noqa: E402
 	DEVICE_KEEPALIVE_INTERVAL_SECONDS,
+	DEVICE_SERVER_MAX_FAILED_CHECKS,
 	UFO_MAX_TOKENS,
 	WINDOWS_EXECUTION_GUIDANCE,
 	build_prompt,
@@ -21,6 +22,7 @@ from app.runtime import (  # noqa: E402
 	patch_ufo_openai_runtime,
 	probe_websocket_server,
 	result_failed,
+	should_restart_device_server,
 	task_execution_failed,
 )
 from app.settings import Settings  # noqa: E402
@@ -275,6 +277,15 @@ def test_probe_websocket_server_rejects_unresponsive_service(monkeypatch):
 	monkeypatch.setattr("app.runtime.socket.create_connection", timeout)
 
 	assert probe_websocket_server("127.0.0.1", 5000, "/ws?token=secret") is False
+
+
+def test_device_server_watchdog_does_not_restart_during_active_run():
+	assert should_restart_device_server("run-active", DEVICE_SERVER_MAX_FAILED_CHECKS + 5) is False
+
+
+def test_device_server_watchdog_requires_consecutive_idle_failures():
+	assert should_restart_device_server(None, DEVICE_SERVER_MAX_FAILED_CHECKS - 1) is False
+	assert should_restart_device_server(None, DEVICE_SERVER_MAX_FAILED_CHECKS) is True
 
 
 def test_constellation_heartbeat_uses_registered_role():
