@@ -339,6 +339,14 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 	run.save(ignore_permissions=True)
 	if run.run_type == "lead_discovery" and run.discovery_task:
 		sync_task(run.discovery_task, payload)
+		if status in TERMINAL_STATUSES:
+			task_status = frappe.db.get_value(TASK_DTYPE, run.discovery_task, "status")
+			run.current_stage = (
+				"候选线索已写入 Frappe，部分结果待人工复核"
+				if task_status == "部分完成"
+				else "候选线索已写入 Frappe"
+			)
+			run.db_set("current_stage", run.current_stage, update_modified=False)
 
 	if status not in TERMINAL_STATUSES:
 		return

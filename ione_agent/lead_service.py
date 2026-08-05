@@ -165,6 +165,13 @@ def _set_crm_field(lead, meta, fieldname: str, value: Any) -> None:
 	lead.set(fieldname, value)
 
 
+def _refresh_task_crm_count(candidate) -> None:
+	if not candidate.task:
+		return
+	count = frappe.db.count(CANDIDATE_DTYPE, {"task": candidate.task, "crm_lead": ["is", "set"]})
+	frappe.db.set_value(TASK_DTYPE, candidate.task, "crm_created_count", count, update_modified=False)
+
+
 @frappe.whitelist()
 def create_crm_lead(candidate_name: str, *, force: bool = False) -> str | None:
 	candidate = frappe.get_doc(CANDIDATE_DTYPE, candidate_name)
@@ -175,6 +182,7 @@ def create_crm_lead(candidate_name: str, *, force: bool = False) -> str | None:
 	):
 		frappe.throw("你无权处理该候选线索。", frappe.PermissionError)
 	if candidate.crm_lead:
+		_refresh_task_crm_count(candidate)
 		return candidate.crm_lead
 	if not frappe.db.exists("DocType", "CRM Lead"):
 		if force:
@@ -210,6 +218,7 @@ def create_crm_lead(candidate_name: str, *, force: bool = False) -> str | None:
 		{"crm_lead": lead.name, "crm_created_at": now_datetime(), "status": "已创建 CRM 线索"},
 		update_modified=False,
 	)
+	_refresh_task_crm_count(candidate)
 	return lead.name
 
 

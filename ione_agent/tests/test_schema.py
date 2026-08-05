@@ -94,3 +94,11 @@ def test_crm_conversion_skips_missing_link_master_data():
 	assert 'field.fieldtype == "Link"' in service
 	assert "frappe.db.exists(field.options, value)" in service
 	assert "_set_crm_field(lead, meta, fieldname, value)" in service
+	assert "_refresh_task_crm_count(candidate)" in service
+	assert '"crm_lead": ["is", "set"]' in service
+
+
+def test_terminal_lead_run_reports_frappe_sync_completion():
+	api = AGENT_API.read_text(encoding="utf-8")
+	assert "候选线索已写入 Frappe，部分结果待人工复核" in api
+	assert 'run.db_set("current_stage", run.current_stage' in api
