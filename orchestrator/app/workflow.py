@@ -5,12 +5,12 @@ import json
 import sqlite3
 from datetime import date
 from typing import Any, TypedDict
-from urllib.parse import urlparse
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from app.clients import DeepSeekClient, HermesClient, QwenClient, SearxngClient, WebPageExtractor
+from app.search_queries import build_search_queries
 from app.settings import Settings
 from app.store import RunStore
 
@@ -103,17 +103,7 @@ class LeadWorkflow:
 		criteria = state["criteria"]
 		self.store.stage(run_id, "researching", 30, "正在检索近期公开招标信息", hermes="等待核验", qwen="已完成")
 		sources = state.get("sources") or []
-		industry = criteria.get("industry") or state["request"]
-		regions = criteria.get("regions") or [""]
-		keywords = criteria.get("keywords") or ["招标", "采购"]
-		queries: list[str] = []
-		for region in regions[:6]:
-			for keyword in keywords[:8]:
-				queries.append(f"{region} {industry} {keyword} 招标 采购 公告".strip())
-		for source in sources[:8]:
-			domain = urlparse(str(source.get("base_url") or "")).hostname
-			if domain:
-				queries.append(f"site:{domain} {industry} 招标 采购 公告")
+		queries = build_search_queries(criteria, sources)
 		search_limit = min(80, max(20, int(criteria["maximum_results"]) * 3))
 		raw = self.searxng.search(queries, limit=search_limit)
 		self.store.stage(
@@ -226,10 +216,23 @@ class LeadWorkflow:
 		try:
 			plans = self.deepseek.review(prompt)
 			plan_map = {item.get("fingerprint"): item.get("deepseek_plan") for item in plans if isinstance(item, dict)}
-			for candidate in candidates:
+			fallback_plan = next(
+				(item.get("deepseek_plan") for item in plans if item.get("deepseek_plan") and not item.get("fingerprint")),
+				None,
+			)
+			matched = 0
+			for candidate in qualified:
 				if candidate.get("fingerprint") in plan_map:
 					candidate["deepseek_plan"] = plan_map[candidate["fingerprint"]]
-			self.store.stage(run_id, "reviewing", 88, "DeepSeek 方案复核完成", deepseek="已完成")
+				elif fallback_plan:
+					candidate["deepseek_plan"] = fallback_plan
+				if candidate.get("deepseek_plan"):
+					matched += 1
+			if matched < len(qualified):
+				partial = True
+				self.store.stage(run_id, "reviewing", 88, "DeepSeek 返回不完整，已保留可用方案", deepseek="部分完成")
+			else:
+				self.store.stage(run_id, "reviewing", 88, "DeepSeek 方案复核完成", deepseek="已完成")
 		except Exception as exc:
 			partial = True
 			self.store.stage(run_id, "reviewing", 88, f"DeepSeek 暂不可用，已保留 Qwen 分析：{type(exc).__name__}", deepseek="暂不可用")

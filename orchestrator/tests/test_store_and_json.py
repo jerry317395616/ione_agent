@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.clients import DeepSeekClient, parse_json
+from app.search_queries import build_search_queries
 from app.settings import Settings
 from app.store import RunStore
 from app.workflow import LeadWorkflow
@@ -12,6 +13,25 @@ def test_parse_json_accepts_fenced_payload():
 
 def test_deepseek_extract_accepts_web_relay_reply():
 	assert DeepSeekClient._extract({"status": "completed", "reply": "[{\"fingerprint\": \"abc\"}]"}) == '[{"fingerprint": "abc"}]'
+
+
+def test_deepseek_keeps_markdown_review_as_fallback_plan():
+	plans = DeepSeekClient._parse_review_content("## 跟进方案\n1. 核验公告与资质")
+	assert plans == [{"deepseek_plan": "## 跟进方案\n1. 核验公告与资质"}]
+
+
+def test_search_queries_are_short_and_drop_all_region_and_slashes():
+	queries = build_search_queries(
+		{
+			"industry": "医疗健康/人工智能",
+			"regions": ["全国"],
+			"keywords": ["医院", "AI辅助诊疗", "医保智能审核", "招标"],
+		},
+		[],
+	)
+	assert "AI辅助诊疗 招标 公告" in queries
+	assert "医保智能审核 招标 公告" in queries
+	assert all("全国" not in query and "/" not in query for query in queries)
 
 
 def test_store_is_idempotent_and_persists_result(tmp_path: Path):

@@ -263,6 +263,16 @@ class DeepSeekClient:
 						return value
 		return ""
 
+	@staticmethod
+	def _parse_review_content(content: str) -> list[dict[str, Any]]:
+		parsed = parse_json(content, [])
+		if isinstance(parsed, dict):
+			parsed = parsed.get("plans") or parsed.get("results") or []
+		if isinstance(parsed, list) and parsed:
+			return [item for item in parsed if isinstance(item, dict)]
+		content = (content or "").strip()
+		return [{"deepseek_plan": content}] if content else []
+
 	def review(self, prompt: str) -> list[dict[str, Any]]:
 		if not self.settings.deepseek_token:
 			raise RuntimeError("DeepSeek review token is not configured")
@@ -278,8 +288,7 @@ class DeepSeekClient:
 			job_id = job.get("id") or job.get("jobId") or job.get("job_id")
 			if not job_id:
 				content = self._extract(job)
-				parsed = parse_json(content, [])
-				return parsed if isinstance(parsed, list) else []
+				return self._parse_review_content(content)
 			deadline = time.monotonic() + 900
 			while time.monotonic() < deadline:
 				status = client.get(f"{self.settings.deepseek_url}/jobs/{job_id}", headers=headers)
@@ -289,7 +298,6 @@ class DeepSeekClient:
 				if state in {"failed", "error", "cancelled"}:
 					raise RuntimeError(self._extract(payload) or f"DeepSeek job {state}")
 				if state in {"completed", "complete", "done", "succeeded", "success"}:
-					parsed = parse_json(self._extract(payload), [])
-					return parsed if isinstance(parsed, list) else []
+					return self._parse_review_content(self._extract(payload))
 				time.sleep(3)
 		raise TimeoutError("DeepSeek review did not finish within 15 minutes")
