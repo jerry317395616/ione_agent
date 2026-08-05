@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import signal
 import socket
@@ -22,8 +23,12 @@ WINDOWS_EXECUTION_GUIDANCE = (
 	"Windows execution rule: run_shell only launches an allow-listed application executable. "
 	"Never use run_shell for shell scripts, redirection, cmd.exe, or PowerShell. "
 	"Open the target application directly (for example excel.exe, winword.exe, or notepad.exe), "
-	"then complete the task through UI automation. Include this rule in every Windows task description and tips."
+	"then complete the task through UI automation. Include this rule in every Windows task description and tips. "
+	"The final user-facing result must be concise Simplified Chinese. Never return raw JSON, internal task "
+	"objects, constellation data, chain-of-thought, or debug output."
 )
+
+FAILED_RESULT_STATES = {"fail", "failed", "error", "cancelled", "canceled"}
 
 
 def probe_websocket_server(host: str, port: int, path: str, timeout: float = 5) -> bool:
@@ -134,14 +139,86 @@ def _strings(value: Any, *, path: str = ""):
 			yield from _strings(item, path=f"{path}[{index}]")
 
 
+def _session_results(result: dict[str, Any]) -> dict[str, Any]:
+	value = result.get("session_results")
+	return value if isinstance(value, dict) else {}
+
+
+def result_failed(result: dict[str, Any]) -> bool:
+	"""Honor Galaxy's nested outcome instead of its transport-level status."""
+	session_results = _session_results(result)
+	stats = session_results.get("final_constellation_stats")
+	constellation = result.get("constellation")
+	states = [result.get("status"), session_results.get("status")]
+	if isinstance(stats, dict):
+		states.append(stats.get("state"))
+	if isinstance(constellation, dict):
+		states.append(constellation.get("state"))
+	return any(str(value or "").strip().lower() in FAILED_RESULT_STATES for value in states)
+
+
+def _constellation_summary(value: Any) -> str:
+	if not isinstance(value, dict):
+		return ""
+	tasks = value.get("tasks")
+	if not isinstance(tasks, dict) or not tasks:
+		return ""
+	statuses = [
+		str(task.get("status") or "").strip().lower()
+		for task in tasks.values()
+		if isinstance(task, dict)
+	]
+	failed = sum(status in FAILED_RESULT_STATES for status in statuses)
+	completed = sum(status in {"complete", "completed", "success", "succeeded"} for status in statuses)
+	if failed:
+		return f"任务执行失败：共执行 {len(statuses)} 个步骤，其中 {failed} 个失败。"
+	if completed:
+		return f"任务已完成：共执行 {len(statuses)} 个步骤，其中 {completed} 个完成。"
+	return ""
+
+
+def _clean_result_text(value: Any) -> str:
+	if not isinstance(value, str):
+		return ""
+	text = value.strip()
+	if not text:
+		return ""
+	if text.startswith(("{", "[")):
+		try:
+			return _constellation_summary(json.loads(text))
+		except (TypeError, ValueError):
+			return ""
+	return text[:4000]
+
+
+def _final_result_text(result: dict[str, Any]) -> str:
+	final_results = _session_results(result).get("final_results")
+	if not isinstance(final_results, list):
+		return ""
+	for item in reversed(final_results):
+		if isinstance(item, dict):
+			for key in ("final_answer", "answer", "summary", "result", "response", "message", "output"):
+				if text := _clean_result_text(item.get(key)):
+					return text
+		elif text := _clean_result_text(item):
+			return text
+	return ""
+
+
 def extract_answer(result: dict[str, Any], events: list[dict[str, Any]]) -> str:
+	if text := _final_result_text(result):
+		return text
 	preferred = ("final_answer", "answer", "response", "output", "result", "summary", "message")
 	candidates: list[tuple[int, int, str]] = []
 	for path, value in _strings(result.get("session_results")):
+		if not (value := _clean_result_text(value)):
+			continue
 		score = next((100 - index for index, key in enumerate(preferred) if key in path.lower()), 0)
 		candidates.append((score, len(value), value))
 	for event in events:
 		for path, value in _strings(event.get("output_data") or event.get("result") or event.get("data")):
+			if not (value := _clean_result_text(value)):
+				continue
 			score = 80 if event.get("event_type", "").startswith("agent") else 10
 			if any(key in path.lower() for key in preferred):
 				score += 20
@@ -149,6 +226,21 @@ def extract_answer(result: dict[str, Any], events: list[dict[str, Any]]) -> str:
 	if not candidates:
 		return ""
 	return max(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def failure_message(result: dict[str, Any]) -> str:
+	session_results = _session_results(result)
+	stats = session_results.get("final_constellation_stats")
+	counts = stats.get("task_status_counts", {}) if isinstance(stats, dict) else {}
+	failed = int(counts.get("failed") or 0) if isinstance(counts, dict) else 0
+	total = int(stats.get("total_tasks") or 0) if isinstance(stats, dict) else 0
+	if failed:
+		prefix = f"任务执行失败：共尝试 {total or failed} 个步骤，{failed} 个失败。"
+	else:
+		prefix = "任务执行失败。"
+	return (
+		f"{prefix} 设备未能完成操作。请确认目标应用已安装、电脑桌面已解锁且设备保持在线，然后重试。"
+	)
 
 
 def build_prompt(request: str, history: list[dict[str, str]]) -> str:
@@ -449,13 +541,13 @@ class UFORuntime:
 				elapsed_seconds=elapsed,
 			)
 			return
-		if result.get("status") == "failed":
+		if result_failed(result):
 			self.store.update(
 				run_id,
 				status="failed",
 				progress=100,
 				current_stage="UFO3 执行失败",
-				error=result.get("error") or "UFO3 execution failed",
+				error=failure_message(result),
 				completed_at=utc_now(),
 				elapsed_seconds=elapsed,
 			)

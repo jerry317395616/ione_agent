@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Correctly treat nested UFO3 constellation failures as failed runs.
+- Prefer user-facing final results and summarize structured responses instead of exposing raw JSON.
+- Pin the UFO3 gateway to the compatible WebSocket client API so desktop tasks can be dispatched.
+
 ## 0.2.6
 
 - Cache-bust the Agent page assets using the application version.

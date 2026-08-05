@@ -10,7 +10,9 @@ from app.runtime import (  # noqa: E402
 	WINDOWS_EXECUTION_GUIDANCE,
 	build_prompt,
 	extract_answer,
+	failure_message,
 	probe_websocket_server,
+	result_failed,
 )
 from app.settings import Settings  # noqa: E402
 
@@ -47,6 +49,55 @@ def test_extract_answer_can_use_agent_event():
 		}
 	]
 	assert extract_answer({}, events) == "来自 UFO3 事件的结果"
+
+
+def test_extract_answer_prefers_final_results_over_raw_constellation_event():
+	result = {
+		"status": "completed",
+		"session_results": {
+			"status": "FINISH",
+			"final_results": [{"result": "微信已成功打开。"}],
+		},
+	}
+	events = [
+		{
+			"event_type": "agent_response",
+			"output_data": {"result": '{"tasks":{"task-1":{"status":"completed"}}}'},
+		}
+	]
+	assert extract_answer(result, events) == "微信已成功打开。"
+
+
+def test_nested_constellation_failure_overrides_completed_transport_status():
+	result = {
+		"status": "completed",
+		"session_results": {
+			"status": "FAIL",
+			"final_constellation_stats": {
+				"state": "failed",
+				"total_tasks": 6,
+				"task_status_counts": {"failed": 6},
+			},
+		},
+		"constellation": {"state": "failed"},
+	}
+	assert result_failed(result) is True
+	assert failure_message(result).startswith("任务执行失败：共尝试 6 个步骤，6 个失败。")
+
+
+def test_raw_constellation_is_summarized_instead_of_returned():
+	result = {
+		"session_results": {},
+	}
+	events = [
+		{
+			"event_type": "agent_response",
+			"output_data": {
+				"result": '{"tasks":{"task-1":{"status":"failed"},"task-2":{"status":"pending"}}}'
+			},
+		}
+	]
+	assert extract_answer(result, events) == "任务执行失败：共执行 2 个步骤，其中 1 个失败。"
 
 
 def test_openai_base_url_does_not_duplicate_chat_completions(tmp_path):

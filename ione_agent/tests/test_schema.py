@@ -49,7 +49,7 @@ def test_windows_installer_uses_text_download_and_explicit_acl_identity():
 	assert '"$($env:USERNAME):(R,W)"' in installer
 	assert '$PythonVersion = "3.10"' in installer
 	assert 'Replacing incompatible Python $ExistingVersion environment' in installer
-	assert 'client_version = "0.2.6"' in installer
+	assert 'client_version = "0.2.7"' in installer
 
 
 def test_windows_launcher_trims_dpapi_ciphertext_before_decrypting():

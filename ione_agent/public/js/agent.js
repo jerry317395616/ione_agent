@@ -95,6 +95,30 @@
     return String(status || "").toLowerCase();
   }
 
+  function formatMessageContent(content) {
+    const text = String(content || "").trim();
+    if (!text.startsWith("{") && !text.startsWith("[")) return { text, error: false };
+    try {
+      const payload = JSON.parse(text);
+      const tasks = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.tasks : null;
+      if (!tasks || typeof tasks !== "object") return { text: "智能体返回了结构化结果，请重新执行任务。", error: true };
+      const statuses = Object.values(tasks)
+        .filter((task) => task && typeof task === "object")
+        .map((task) => String(task.status || "").toLowerCase());
+      const failed = statuses.filter((status) => ["fail", "failed", "error"].includes(status)).length;
+      const completed = statuses.filter((status) => ["complete", "completed", "success", "succeeded"].includes(status)).length;
+      if (failed) {
+        return {
+          text: `任务执行失败：共执行 ${statuses.length} 个步骤，其中 ${failed} 个失败。请确认目标应用已安装、电脑桌面已解锁且设备保持在线，然后重试。`,
+          error: true,
+        };
+      }
+      return { text: `任务已完成：共执行 ${statuses.length} 个步骤，其中 ${completed} 个完成。`, error: false };
+    } catch (_) {
+      return { text: "智能体返回了无法识别的结构化结果，请重新执行任务。", error: true };
+    }
+  }
+
   function renderSessions() {
     els.sessionList.replaceChildren();
     if (!state.sessions.length) {
@@ -127,15 +151,16 @@
   }
 
   function messageElement(message) {
+    const formatted = formatMessageContent(message.content);
     const article = document.createElement("article");
-    article.className = `message ${message.role === "user" ? "user" : "assistant"}${message.message_type === "error" ? " error" : ""}`;
+    article.className = `message ${message.role === "user" ? "user" : "assistant"}${message.message_type === "error" || formatted.error ? " error" : ""}`;
     const avatar = document.createElement("div");
     avatar.className = "message-avatar";
     avatar.textContent = message.role === "user" ? "我" : "IA";
     const body = document.createElement("div");
     body.className = "message-body";
     const text = document.createElement("div");
-    text.textContent = message.content || "";
+    text.textContent = formatted.text;
     const time = document.createElement("span");
     time.className = "message-time";
     time.textContent = formatTime(message.sent_at);
