@@ -6,7 +6,7 @@
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>{{ title }}</title>
   <link rel="icon" href="/assets/ione_agent/images/ione-agent-logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/ione_agent/css/agent.css">
+  <link rel="stylesheet" href="/assets/ione_agent/css/agent.css?v={{ asset_version }}">
 </head>
 <body>
   <div id="agent-app" class="agent-shell" aria-busy="true">
@@ -144,6 +144,6 @@
   </div>
 
   <div id="toast-region" class="toast-region" aria-live="assertive"></div>
-  <script src="/assets/ione_agent/js/agent.js" defer></script>
+  <script src="/assets/ione_agent/js/agent.js?v={{ asset_version }}" defer></script>
 </body>
 </html>

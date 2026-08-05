@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import frappe
 
+from ione_agent import __version__
 from ione_agent.permissions import has_app_permission
 
 no_cache = 1
@@ -16,6 +17,7 @@ def get_context(context):
 
 	context.no_cache = 1
 	context.title = "I-ONE Agent"
+	context.asset_version = __version__
 	context.csrf_token = frappe.sessions.get_csrf_token()
 	context.user = frappe.session.user
 	return context

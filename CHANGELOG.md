@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6
+
+- Cache-bust the Agent page assets using the application version.
+- Open device management immediately while refreshing devices in the background.
+
 ## 0.2.5
 
 - Move the UFO device-server watchdog to an independent thread.

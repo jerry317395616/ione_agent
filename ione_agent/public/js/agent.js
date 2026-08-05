@@ -231,11 +231,11 @@
     }
   }
 
-  async function openDeviceModal() {
+  function openDeviceModal() {
     els.deviceModal.hidden = false;
     document.body.classList.add("modal-open");
-    try { await loadDevices(); } catch (error) { showToast(error.message); }
     window.clearInterval(state.devicePollTimer);
+    loadDevices().catch((error) => showToast(error.message));
     state.devicePollTimer = window.setInterval(() => loadDevices().catch(() => {}), 4000);
   }
 
