@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- Replace the fixed lead pipeline with a governed LangGraph model/tool loop.
+- Add versioned tool schemas, allowlisting, risk policy, parameter validation and idempotent replay.
+- Add Qwen controller routing with optional DeepSeek web control and automatic Qwen fallback.
+- Add DeepSeek circuit breaking, unique browser conversations and Qwen review fallback.
+- Add durable model/tool audit trails, authenticated run traces and Prometheus-style metrics.
+- Add PostgreSQL checkpoint support with SQLite WAL fallback for single-node deployments.
+
 ## 0.3.0
 
 - Add natural-language lead and tender discovery with a persistent LangGraph orchestrator.

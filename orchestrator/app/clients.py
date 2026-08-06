@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import re
 import socket
+import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
 from typing import Any, ClassVar
@@ -14,6 +17,12 @@ from uuid import uuid4
 import httpx
 
 from app.settings import Settings
+
+AuditCallback = Callable[..., None]
+
+
+def _request_hash(*parts: str) -> str:
+	return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def parse_json(text: str, default: Any) -> Any:
@@ -38,26 +47,97 @@ def parse_json(text: str, default: Any) -> Any:
 
 
 class QwenClient:
-	def __init__(self, settings: Settings) -> None:
+	def __init__(self, settings: Settings, audit: AuditCallback | None = None) -> None:
 		self.settings = settings
+		self.audit = audit
 
-	def chat(self, system: str, user: str, *, temperature: float = 0.1, timeout: float = 180) -> str:
-		with httpx.Client(timeout=timeout) as client:
-			response = client.post(
-				self.settings.qwen_chat_url,
-				headers={"Authorization": f"Bearer {self.settings.qwen_api_key}"},
-				json={
-					"model": self.settings.qwen_model,
-					"messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-					"temperature": temperature,
-					"stream": False,
-				},
-			)
-			response.raise_for_status()
-			return str(response.json()["choices"][0]["message"]["content"])
+	def chat(
+		self,
+		system: str,
+		user: str,
+		*,
+		temperature: float = 0.1,
+		timeout: float = 180,
+		run_id: str | None = None,
+		purpose: str = "chat",
+	) -> str:
+		started = time.monotonic()
+		request_hash = _request_hash(system, user)
+		last_error: Exception | None = None
+		for attempt in range(2):
+			try:
+				with httpx.Client(timeout=timeout) as client:
+					response = client.post(
+						self.settings.qwen_chat_url,
+						headers={"Authorization": f"Bearer {self.settings.qwen_api_key}"},
+						json={
+							"model": self.settings.qwen_model,
+							"messages": [
+								{"role": "system", "content": system},
+								{"role": "user", "content": user},
+							],
+							"temperature": temperature,
+							"stream": False,
+						},
+					)
+					response.raise_for_status()
+					content = str(response.json()["choices"][0]["message"]["content"])
+				last_error = None
+				if self.audit:
+					self.audit(
+						run_id=run_id,
+						provider="qwen",
+						model=self.settings.qwen_model,
+						purpose=purpose,
+						status="completed",
+						request_hash=request_hash,
+						response_preview=content,
+						elapsed_ms=int((time.monotonic() - started) * 1000),
+					)
+				return content
+			except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+				last_error = exc
+				if attempt == 0:
+					time.sleep(1)
+					continue
+				if self.audit:
+					self.audit(
+						run_id=run_id,
+						provider="qwen",
+						model=self.settings.qwen_model,
+						purpose=purpose,
+						status="failed",
+						request_hash=request_hash,
+						error=f"{type(exc).__name__}: {exc}",
+						elapsed_ms=int((time.monotonic() - started) * 1000),
+					)
+				raise
+			except Exception as exc:
+				last_error = exc
+				if self.audit:
+					self.audit(
+						run_id=run_id,
+						provider="qwen",
+						model=self.settings.qwen_model,
+						purpose=purpose,
+						status="failed",
+						request_hash=request_hash,
+						error=f"{type(exc).__name__}: {exc}",
+						elapsed_ms=int((time.monotonic() - started) * 1000),
+					)
+				raise
+		raise RuntimeError("Qwen request failed") from last_error
 
-	def json(self, system: str, user: str, default: Any) -> Any:
-		return parse_json(self.chat(system, user), default)
+	def json(
+		self,
+		system: str,
+		user: str,
+		default: Any,
+		*,
+		run_id: str | None = None,
+		purpose: str = "structured_output",
+	) -> Any:
+		return parse_json(self.chat(system, user, run_id=run_id, purpose=purpose), default)
 
 
 class HermesClient:
@@ -248,9 +328,17 @@ class WebPageExtractor:
 		return enriched
 
 
+class CircuitOpenError(RuntimeError):
+	pass
+
+
 class DeepSeekClient:
-	def __init__(self, settings: Settings) -> None:
+	def __init__(self, settings: Settings, audit: AuditCallback | None = None) -> None:
 		self.settings = settings
+		self.audit = audit
+		self._lock = threading.Lock()
+		self._consecutive_failures = 0
+		self._opened_until = 0.0
 
 	@staticmethod
 	def _extract(payload: Any) -> str:
@@ -309,31 +397,110 @@ class DeepSeekClient:
 	def _conversation_key() -> str:
 		return f"ione-agent-lead-{uuid4().hex[:16]}"
 
-	def review(self, prompt: str) -> list[dict[str, Any]]:
+	def health(self) -> dict[str, Any]:
+		with self._lock:
+			remaining = max(0, int(self._opened_until - time.monotonic()))
+			return {
+				"state": "open" if remaining else "closed",
+				"consecutive_failures": self._consecutive_failures,
+				"retry_after_seconds": remaining,
+			}
+
+	def _before_call(self) -> None:
+		with self._lock:
+			if self._opened_until > time.monotonic():
+				raise CircuitOpenError("DeepSeek 网页服务熔断中，请稍后重试。")
+			if self._opened_until:
+				self._opened_until = 0
+				self._consecutive_failures = 0
+
+	def _record_success(self) -> None:
+		with self._lock:
+			self._consecutive_failures = 0
+			self._opened_until = 0
+
+	def _record_failure(self) -> None:
+		with self._lock:
+			self._consecutive_failures += 1
+			if self._consecutive_failures >= self.settings.deepseek_breaker_failures:
+				self._opened_until = time.monotonic() + self.settings.deepseek_breaker_cooldown_seconds
+
+	def chat(self, prompt: str, *, run_id: str | None = None, purpose: str = "reasoning") -> str:
 		if not self.settings.deepseek_token:
 			raise RuntimeError("DeepSeek review token is not configured")
+		self._before_call()
+		started = time.monotonic()
+		request_hash = _request_hash(prompt)
 		headers = {"Authorization": f"Bearer {self.settings.deepseek_token}"}
-		with httpx.Client(timeout=60) as client:
-			response = client.post(
-				f"{self.settings.deepseek_url}/jobs",
-				headers=headers,
-				json={"prompt": prompt, "conversationKey": self._conversation_key()},
-			)
-			response.raise_for_status()
-			job = self._job_payload(response.json())
-			job_id = job.get("id") or job.get("jobId") or job.get("job_id")
-			if not job_id:
-				content = self._extract(job)
-				return self._parse_review_content(content)
-			deadline = time.monotonic() + 900
-			while time.monotonic() < deadline:
-				status = client.get(f"{self.settings.deepseek_url}/jobs/{job_id}", headers=headers)
-				status.raise_for_status()
-				payload = self._job_payload(status.json())
-				state = str(payload.get("status") or "").lower()
-				if state in {"failed", "error", "cancelled"}:
-					raise RuntimeError(self._extract(payload) or f"DeepSeek job {state}")
-				if state in {"completed", "complete", "done", "succeeded", "success"}:
-					return self._parse_review_content(self._extract(payload))
-				time.sleep(3)
-		raise TimeoutError("DeepSeek review did not finish within 15 minutes")
+		try:
+			with httpx.Client(timeout=60) as client:
+				response = client.post(
+					f"{self.settings.deepseek_url}/jobs",
+					headers=headers,
+					json={"prompt": prompt, "conversationKey": self._conversation_key()},
+				)
+				response.raise_for_status()
+				job = self._job_payload(response.json())
+				job_id = job.get("id") or job.get("jobId") or job.get("job_id")
+				if not job_id:
+					content = self._extract(job)
+				else:
+					deadline = time.monotonic() + self.settings.deepseek_job_timeout_seconds
+					content = ""
+					while time.monotonic() < deadline:
+						status = client.get(f"{self.settings.deepseek_url}/jobs/{job_id}", headers=headers)
+						status.raise_for_status()
+						payload = self._job_payload(status.json())
+						state = str(payload.get("status") or "").lower()
+						if state in {"failed", "error", "cancelled"}:
+							raise RuntimeError(self._extract(payload) or f"DeepSeek job {state}")
+						if state in {"completed", "complete", "done", "succeeded", "success"}:
+							content = self._extract(payload)
+							break
+						time.sleep(3)
+					if not content:
+						raise TimeoutError(
+							f"DeepSeek job did not finish within {self.settings.deepseek_job_timeout_seconds} seconds"
+						)
+			if not content.strip():
+				raise RuntimeError("DeepSeek returned an empty response")
+			self._record_success()
+			if self.audit:
+				self.audit(
+					run_id=run_id,
+					provider="deepseek_web",
+					model="deepseek-web",
+					purpose=purpose,
+					status="completed",
+					request_hash=request_hash,
+					response_preview=content,
+					elapsed_ms=int((time.monotonic() - started) * 1000),
+				)
+			return content
+		except Exception as exc:
+			self._record_failure()
+			if self.audit:
+				self.audit(
+					run_id=run_id,
+					provider="deepseek_web",
+					model="deepseek-web",
+					purpose=purpose,
+					status="failed",
+					request_hash=request_hash,
+					error=f"{type(exc).__name__}: {exc}",
+					elapsed_ms=int((time.monotonic() - started) * 1000),
+				)
+			raise
+
+	def json(
+		self,
+		prompt: str,
+		default: Any,
+		*,
+		run_id: str | None = None,
+		purpose: str = "structured_reasoning",
+	) -> Any:
+		return parse_json(self.chat(prompt, run_id=run_id, purpose=purpose), default)
+
+	def review(self, prompt: str, *, run_id: str | None = None) -> list[dict[str, Any]]:
+		return self._parse_review_content(self.chat(prompt, run_id=run_id, purpose="lead_review"))

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.clients import DeepSeekClient, parse_json
+from app.contracts import AgentDecision, AgentToolCall
 from app.search_queries import build_search_queries
 from app.settings import Settings
 from app.store import RunStore
@@ -75,7 +76,7 @@ def test_workflow_produces_traceable_candidate(tmp_path: Path):
 	workflow = LeadWorkflow(settings, store)
 
 	class FakeQwen:
-		def json(self, system, user, default):
+		def json(self, system, user, default, **kwargs):
 			if "required_schema" in user:
 				return {"industry": "医疗", "maximum_results": 10, "score_threshold": 70}
 			return [
@@ -102,15 +103,29 @@ def test_workflow_produces_traceable_candidate(tmp_path: Path):
 			return results
 
 	class FakeDeepSeek:
-		def review(self, prompt):
+		def review(self, prompt, **kwargs):
 			return []
+
+	class FakeRouter:
+		def decide(self, state, *, tools, required_tool):
+			if required_tool:
+				return AgentDecision(
+					type="tool_call",
+					tool_call=AgentToolCall(id=f"call-{required_tool}", name=required_tool, arguments={}),
+				)
+			return AgentDecision(type="answer", content=state.get("summary") or "完成")
 
 	workflow.qwen = FakeQwen()
 	workflow.hermes = FakeHermes()
 	workflow.searxng = FakeSearxng()
 	workflow.extractor = FakeExtractor()
 	workflow.deepseek = FakeDeepSeek()
+	workflow.router = FakeRouter()
 	state = workflow.run(run["run_id"], run["payload"])
 	assert state["criteria"]["industry"] == "医疗"
 	assert state["candidates"][0]["fingerprint"]
 	assert "1 条" in state["summary"]
+	trace = store.trace(run["run_id"])
+	assert [row["tool_name"] for row in trace["tools"]] == list(workflow.TOOL_SEQUENCE)
+	assert all(row["status"] == "completed" for row in trace["tools"])
+	workflow.close()
