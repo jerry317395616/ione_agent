@@ -48,6 +48,20 @@ Users can ask, for example, “寻找近 30 天医疗行业的招标和采购线
 
 The orchestrator is deployed from `orchestrator/`. Copy `.env.example` to a protected environment file and never commit tokens. Production deployments should configure `IONE_CHECKPOINT_DATABASE_URL` for PostgreSQL. SQLite WAL remains available for development and single-process recovery.
 
+## LibreChat frontend
+
+The production chat frontend is maintained in `jerry317395616/LibreChat`, a fork of the actual
+LibreChat application. The similarly named `librechat.ai` repository is the documentation website
+and is intentionally not used as the chat runtime.
+
+LibreChat connects to this service as an OpenAI-compatible custom endpoint at `/v1`. The bridge
+accepts streamed chat requests, keeps long tasks alive with SSE comments, and calls the existing
+Frappe `ione_agent.api` methods. This preserves Frappe sessions, run audits, lead tasks, candidate
+records and CRM writes instead of bypassing the business layer. Configure a distinct
+`IONE_LIBRECHAT_API_TOKEN` plus a dedicated Frappe integration user's API credentials; do not reuse
+browser passwords or commit credentials. Set `ione_agent_frontend_url` in the Frappe site config to
+the deployed LibreChat URL when the new frontend is ready.
+
 ## Production agent controls
 
 - Every new lead task first enters a dedicated DeepSeek planning node. The validated goal, search strategy, tool plan and completion criteria are persisted in LangGraph State.

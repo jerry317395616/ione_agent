@@ -34,6 +34,13 @@ class Settings:
 	deepseek_breaker_failures: int = 3
 	deepseek_breaker_cooldown_seconds: int = 300
 	checkpoint_database_url: str = ""
+	librechat_api_token: str = ""
+	frappe_base_url: str = ""
+	frappe_api_key: str = ""
+	frappe_api_secret: str = ""
+	frappe_host_header: str = ""
+	frappe_verify_tls: bool = True
+	librechat_run_timeout_seconds: int = 1800
 
 	@classmethod
 	def from_environment(cls) -> Settings:
@@ -72,6 +79,27 @@ class Settings:
 				30, min(3600, int(os.getenv("DEEPSEEK_BREAKER_COOLDOWN_SECONDS", "300")))
 			),
 			checkpoint_database_url=os.getenv("IONE_CHECKPOINT_DATABASE_URL", "").strip(),
+			librechat_api_token=os.getenv("IONE_LIBRECHAT_API_TOKEN", "").strip(),
+			frappe_base_url=os.getenv("IONE_FRAPPE_BASE_URL", "").strip().rstrip("/"),
+			frappe_api_key=os.getenv("IONE_FRAPPE_API_KEY", "").strip(),
+			frappe_api_secret=os.getenv("IONE_FRAPPE_API_SECRET", "").strip(),
+			frappe_host_header=os.getenv("IONE_FRAPPE_HOST_HEADER", "").strip(),
+			frappe_verify_tls=os.getenv("IONE_FRAPPE_VERIFY_TLS", "true").strip().lower()
+			not in {"0", "false", "no"},
+			librechat_run_timeout_seconds=max(
+				300, min(3600, int(os.getenv("IONE_LIBRECHAT_RUN_TIMEOUT_SECONDS", "1800")))
+			),
+		)
+
+	@property
+	def librechat_ready(self) -> bool:
+		return all(
+			(
+				self.librechat_api_token,
+				self.frappe_base_url,
+				self.frappe_api_key,
+				self.frappe_api_secret,
+			)
 		)
 
 	@property

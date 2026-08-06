@@ -15,6 +15,11 @@ def get_context(context):
 	if not has_app_permission():
 		frappe.throw("你没有使用 I-ONE Agent 的权限。", frappe.PermissionError)
 
+	frontend_url = str(frappe.conf.get("ione_agent_frontend_url") or "").strip()
+	if frontend_url:
+		frappe.local.flags.redirect_location = frontend_url
+		raise frappe.Redirect
+
 	context.no_cache = 1
 	context.title = "I-ONE Agent"
 	context.asset_version = __version__

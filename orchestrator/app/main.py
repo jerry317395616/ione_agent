@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from time import monotonic
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from app.clients import QwenClient
 from app.contracts import GRAPH_VERSION
+from app.librechat import ChatCompletionRequest, LibreChatBridge
 from app.models import ClassifyRequest, CreateRunRequest
 from app.settings import Settings
 from app.store import RunStore, utc_now
@@ -20,6 +22,7 @@ settings = Settings.from_environment()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 store = RunStore(settings.data_dir / "runs.sqlite3")
 workflow = LeadWorkflow(settings, store)
+librechat_bridge = LibreChatBridge(settings) if settings.librechat_ready else None
 queue: asyncio.Queue[str] = asyncio.Queue()
 workers: list[asyncio.Task] = []
 enqueued_runs: set[str] = set()
@@ -29,6 +32,16 @@ enqueue_lock = asyncio.Lock()
 def authorize(authorization: str | None = Header(default=None)) -> None:
 	expected = f"Bearer {settings.api_token}"
 	if not authorization or not hmac.compare_digest(authorization, expected):
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
+def authorize_librechat(authorization: str | None = Header(default=None)) -> None:
+	expected = f"Bearer {settings.librechat_api_token}"
+	if (
+		not settings.librechat_ready
+		or not authorization
+		or not hmac.compare_digest(authorization, expected)
+	):
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
@@ -118,13 +131,15 @@ async def lifespan(app: FastAPI):
 	for task in workers:
 		task.cancel()
 	await asyncio.gather(*workers, return_exceptions=True)
+	if librechat_bridge:
+		await librechat_bridge.close()
 	workflow.close()
 
 
 app = FastAPI(
 	title="I-ONE Lead Intelligence Orchestrator",
 	description="LangGraph orchestration for verifiable lead discovery",
-	version="0.5.0",
+	version="0.6.0",
 	lifespan=lifespan,
 )
 
@@ -145,6 +160,7 @@ def health() -> dict:
 		"tools": workflow.registry.names(),
 		"queued": queue.qsize(),
 		"workers": len(workers),
+		"librechat": "configured" if settings.librechat_ready else "unavailable",
 		"time": datetime.now(timezone.utc).isoformat(),
 	}
 
@@ -219,3 +235,48 @@ def stop_run(run_id: str) -> dict:
 	if run["status"] == "queued":
 		run = store.update(run_id, status="stopped", stage="stopped", completed_at=utc_now())
 	return run
+
+
+@app.get("/v1/models", dependencies=[Depends(authorize_librechat)])
+def list_openai_models() -> dict:
+	return {
+		"object": "list",
+		"data": [
+			{
+				"id": "ione-agent",
+				"object": "model",
+				"created": 0,
+				"owned_by": "I-ONE",
+			}
+		],
+	}
+
+
+@app.post("/v1/chat/completions", dependencies=[Depends(authorize_librechat)])
+async def openai_chat_completions(
+	request: ChatCompletionRequest,
+	x_librechat_user_id: str | None = Header(default=None),
+	x_librechat_conversation_id: str | None = Header(default=None),
+):
+	if not librechat_bridge:
+		raise HTTPException(status_code=503, detail="LibreChat bridge is not configured")
+	user_id = (x_librechat_user_id or "librechat-user")[:140]
+	conversation_id = (x_librechat_conversation_id or f"conversation-{uuid.uuid4().hex}")[:180]
+	if request.stream:
+		return StreamingResponse(
+			librechat_bridge.stream(
+				request,
+				user_id=user_id,
+				conversation_id=conversation_id,
+			),
+			media_type="text/event-stream",
+			headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+		)
+	try:
+		return await librechat_bridge.complete(
+			request,
+			user_id=user_id,
+			conversation_id=conversation_id,
+		)
+	except ValueError as exc:
+		raise HTTPException(status_code=422, detail=str(exc)) from exc

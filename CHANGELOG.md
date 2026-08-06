@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Add an authenticated OpenAI-compatible LibreChat bridge backed by the existing Frappe Agent APIs.
+- Preserve Frappe sessions, execution audits, lead discovery records and CRM writes when LibreChat is used.
+- Stream keep-alive events during long Agent runs and stop the Frappe run when a client disconnects.
+- Allow the authenticated `/agent` route to redirect to a configured external frontend.
+
 ## 0.5.0
 
 - Add a dedicated DeepSeek-first planning node before the LangGraph model/tool loop.
