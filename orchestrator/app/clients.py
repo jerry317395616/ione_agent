@@ -439,15 +439,23 @@ class DeepSeekClient:
 			if self._consecutive_failures >= self.settings.deepseek_breaker_failures:
 				self._opened_until = time.monotonic() + self.settings.deepseek_breaker_cooldown_seconds
 
-	def chat(self, prompt: str, *, run_id: str | None = None, purpose: str = "reasoning") -> str:
+	def chat(
+		self,
+		prompt: str,
+		*,
+		timeout: int | None = None,
+		run_id: str | None = None,
+		purpose: str = "reasoning",
+	) -> str:
 		if not self.settings.deepseek_token:
 			raise RuntimeError("DeepSeek review token is not configured")
 		self._before_call()
 		started = time.monotonic()
+		job_timeout = timeout or self.settings.deepseek_job_timeout_seconds
 		request_hash = _request_hash(prompt)
 		headers = {"Authorization": f"Bearer {self.settings.deepseek_token}"}
 		try:
-			with httpx.Client(timeout=60) as client:
+			with httpx.Client(timeout=min(60, max(15, job_timeout))) as client:
 				response = client.post(
 					f"{self.settings.deepseek_url}/jobs",
 					headers=headers,
@@ -459,7 +467,7 @@ class DeepSeekClient:
 				if not job_id:
 					content = self._extract(job)
 				else:
-					deadline = time.monotonic() + self.settings.deepseek_job_timeout_seconds
+					deadline = time.monotonic() + job_timeout
 					content = ""
 					while time.monotonic() < deadline:
 						status = client.get(f"{self.settings.deepseek_url}/jobs/{job_id}", headers=headers)
@@ -473,9 +481,7 @@ class DeepSeekClient:
 							break
 						time.sleep(3)
 					if not content:
-						raise TimeoutError(
-							f"DeepSeek job did not finish within {self.settings.deepseek_job_timeout_seconds} seconds"
-						)
+						raise TimeoutError(f"DeepSeek job did not finish within {job_timeout} seconds")
 			if not content.strip():
 				raise RuntimeError("DeepSeek returned an empty response")
 			self._record_success()
@@ -511,10 +517,14 @@ class DeepSeekClient:
 		prompt: str,
 		default: Any,
 		*,
+		timeout: int | None = None,
 		run_id: str | None = None,
 		purpose: str = "structured_reasoning",
 	) -> Any:
-		return parse_json(self.chat(prompt, run_id=run_id, purpose=purpose), default)
+		return parse_json(
+			self.chat(prompt, timeout=timeout, run_id=run_id, purpose=purpose),
+			default,
+		)
 
 	def review(self, prompt: str, *, run_id: str | None = None) -> list[dict[str, Any]]:
 		return self._parse_review_content(self.chat(prompt, run_id=run_id, purpose="lead_review"))

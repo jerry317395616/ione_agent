@@ -7,8 +7,8 @@ I-ONE Agent is a Frappe application for enterprise conversations, verifiable lea
 - Frappe: authentication, permissions, session/message persistence and the `/agent` user interface.
 - Lead Intelligence Orchestrator: governed LangGraph model/tool loop with persistent checkpoints, typed tools, policy enforcement and idempotent result synchronization.
 - Hermes Agent: internet research against configured official tender and procurement sources.
-- Qwen: primary model for intent parsing, structured extraction, scoring and summaries.
-- DeepSeek: auxiliary reviewer that produces the sales pursuit plan attached to each qualified lead.
+- DeepSeek: first-stage planning model and final specialist reviewer for qualified leads.
+- Qwen: stable execution controller, structured extractor, scoring model and planning fallback.
 - I-ONE UFO Gateway: isolated Python 3.10 service that owns UFO3 execution and run events.
 - UFO3: pinned from the official Microsoft UFO repository `main` branch during the gateway build.
 - Qwen: OpenAI-compatible model endpoint supplied through gateway environment variables.
@@ -50,9 +50,10 @@ The orchestrator is deployed from `orchestrator/`. Copy `.env.example` to a prot
 
 ## Production agent controls
 
-- Qwen is the default controller because it exposes a stable OpenAI-compatible interface.
-- DeepSeek web can be selected with `IONE_AGENT_CONTROL_MODEL=deepseek`; malformed output or browser failure falls back to Qwen.
-- DeepSeek remains the specialist reviewer for qualified leads and uses an isolated browser conversation for every call.
+- Every new lead task first enters a dedicated DeepSeek planning node. The validated goal, search strategy, tool plan and completion criteria are persisted in LangGraph State.
+- DeepSeek planning is bounded by `DEEPSEEK_PLANNING_TIMEOUT_SECONDS` and falls back once to Qwen, then to a deterministic safe plan if both models are unavailable.
+- Qwen is always the execution controller. It may only choose tools allowed by the validated plan whose dependencies are satisfied.
+- DeepSeek remains the final specialist reviewer for qualified leads and uses an isolated browser conversation for every call.
 - Hermes only receives the requested candidate set with bounded source text. `HERMES_REQUEST_TIMEOUT_SECONDS` defaults to 240 seconds; a timeout preserves collected evidence and lets Qwen continue the run.
 - Every tool is versioned, allowlisted, validated and assigned a risk level before execution.
 - Tool side effects use a deterministic idempotency key and are recorded in the orchestrator audit database.

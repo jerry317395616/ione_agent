@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from app.clients import DeepSeekClient, parse_json
-from app.contracts import AgentDecision, AgentToolCall
+from app.contracts import GRAPH_VERSION, AgentDecision, AgentToolCall
+from app.models import CreateRunRequest
 from app.search_queries import build_search_queries
 from app.settings import Settings
 from app.store import RunStore
@@ -10,6 +11,13 @@ from app.workflow import LeadWorkflow, ReviewCandidatesArguments
 
 def test_parse_json_accepts_fenced_payload():
 	assert parse_json('result\n```json\n{"intent":"lead_discovery"}\n```', {}) == {"intent": "lead_discovery"}
+	assert GRAPH_VERSION == "lead-agent-v2"
+	assert CreateRunRequest(
+		client_run_id="RUN-V2",
+		task_id="TASK-V2",
+		user_id="u",
+		request="找线索",
+	).graph_version == GRAPH_VERSION
 
 
 def test_deepseek_extract_accepts_web_relay_reply():
@@ -92,6 +100,25 @@ def test_fallback_review_plan_uses_only_candidate_facts():
 	assert "https://www.ccgp.gov.cn/tender/1" in plan
 
 
+def test_completion_criteria_are_evaluated_against_verified_results():
+	evaluation = LeadWorkflow._evaluate_completion(
+		{
+			"criteria": {"score_threshold": 70},
+			"completion_criteria": {"minimum_verified_sources": 2, "minimum_qualified_leads": 1},
+			"candidates": [
+				{
+					"source_url": "https://www.ccgp.gov.cn/tender/1",
+					"evidence": [{"url": "https://www.ccgp.gov.cn/tender/1"}],
+					"relevance_score": 88,
+				}
+			],
+		}
+	)
+	assert evaluation["met"] is False
+	assert evaluation["qualified_leads"] == 1
+	assert evaluation["shortfalls"] == ["可核验来源 1/2"]
+
+
 def test_review_completes_when_deepseek_and_qwen_both_timeout(tmp_path: Path):
 	settings = Settings(
 		api_token="token",
@@ -143,6 +170,141 @@ def test_review_completes_when_deepseek_and_qwen_both_timeout(tmp_path: Path):
 	workflow.close()
 
 
+def test_initial_planning_prefers_deepseek_and_persists_a_valid_plan(tmp_path: Path):
+	settings = Settings(
+		api_token="token",
+		data_dir=tmp_path,
+		qwen_base_url="http://qwen/v1",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		hermes_url="http://hermes",
+		hermes_api_key="key",
+		searxng_url="http://search",
+		deepseek_url="http://deepseek",
+		deepseek_token="key",
+		max_concurrent_runs=1,
+	)
+	store = RunStore(tmp_path / "planning.sqlite3")
+	run = store.create(
+		{"client_run_id": "RUN-PLAN", "task_id": "TASK-PLAN", "user_id": "u", "request": "找医疗行业线索"}
+	)
+	workflow = LeadWorkflow(settings, store)
+
+	class PlanningDeepSeek:
+		def json(self, prompt, default, **kwargs):
+			assert kwargs["purpose"] == "lead_initial_planning"
+			assert kwargs["timeout"] == 90
+			return {
+				"intent": "lead_discovery",
+				"goal": "发现近期医疗招标机会",
+				"search_strategy": {"industry": "医疗", "days_back": 30},
+				"required_tools": [
+					"parse_lead_request",
+					"search_public_tenders",
+					"analyze_lead_candidates",
+					"review_qualified_leads",
+					"complete_lead_discovery",
+				],
+				"completion_criteria": {"minimum_verified_sources": 8, "minimum_qualified_leads": 2},
+				"requires_final_review": True,
+			}
+
+	workflow.deepseek = PlanningDeepSeek()
+	result = workflow.create_initial_plan(
+		{
+			"run_id": run["run_id"],
+			"request": "找医疗行业线索",
+			"profile": {},
+			"sources": [],
+		}
+	)
+	assert result["planning_model"] == "deepseek"
+	assert result["goal"] == "发现近期医疗招标机会"
+	assert result["completion_criteria"]["minimum_verified_sources"] == 8
+	assert result["plan"] == list(workflow.DEFAULT_TOOL_PLAN)
+	workflow.close()
+
+
+def test_initial_planning_falls_back_to_qwen_without_failing_the_run(tmp_path: Path):
+	settings = Settings(
+		api_token="token",
+		data_dir=tmp_path,
+		qwen_base_url="http://qwen/v1",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		hermes_url="http://hermes",
+		hermes_api_key="key",
+		searxng_url="http://search",
+		deepseek_url="http://deepseek",
+		deepseek_token="key",
+		max_concurrent_runs=1,
+	)
+	store = RunStore(tmp_path / "planning-fallback.sqlite3")
+	run = store.create(
+		{"client_run_id": "RUN-PLAN-FALLBACK", "task_id": "TASK-PLAN", "user_id": "u", "request": "找线索"}
+	)
+	workflow = LeadWorkflow(settings, store)
+
+	class FailingDeepSeek:
+		def json(self, prompt, default, **kwargs):
+			raise TimeoutError("planner timeout")
+
+	class PlanningQwen:
+		def json(self, system, user, default, **kwargs):
+			assert kwargs["max_attempts"] == 1
+			return {
+				"intent": "lead_discovery",
+				"goal": "寻找可核验线索",
+				"required_tools": list(workflow.DEFAULT_TOOL_PLAN),
+			}
+
+	workflow.deepseek = FailingDeepSeek()
+	workflow.qwen = PlanningQwen()
+	result = workflow.create_initial_plan(
+		{"run_id": run["run_id"], "request": "找线索", "profile": {}, "sources": []}
+	)
+	assert result["planning_model"] == "qwen"
+	assert "DeepSeek TimeoutError" in result["planning_error"]
+	assert result["planning_complete"] is True
+	workflow.close()
+
+
+def test_initial_planning_uses_safe_plan_when_both_models_fail(tmp_path: Path):
+	settings = Settings(
+		api_token="token",
+		data_dir=tmp_path,
+		qwen_base_url="http://qwen/v1",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		hermes_url="http://hermes",
+		hermes_api_key="key",
+		searxng_url="http://search",
+		deepseek_url="http://deepseek",
+		deepseek_token="key",
+		max_concurrent_runs=1,
+	)
+	store = RunStore(tmp_path / "planning-safe.sqlite3")
+	run = store.create(
+		{"client_run_id": "RUN-PLAN-SAFE", "task_id": "TASK-PLAN", "user_id": "u", "request": "找线索"}
+	)
+	workflow = LeadWorkflow(settings, store)
+
+	class FailingPlanner:
+		def json(self, *args, **kwargs):
+			raise TimeoutError("unavailable")
+
+	workflow.deepseek = FailingPlanner()
+	workflow.qwen = FailingPlanner()
+	result = workflow.create_initial_plan(
+		{"run_id": run["run_id"], "request": "找线索", "profile": {}, "sources": []}
+	)
+	assert result["planning_model"] == "deterministic"
+	assert result["plan"] == list(workflow.DEFAULT_TOOL_PLAN)
+	assert "DeepSeek TimeoutError" in result["planning_error"]
+	assert "Qwen TimeoutError" in result["planning_error"]
+	workflow.close()
+
+
 def test_workflow_produces_traceable_candidate(tmp_path: Path):
 	settings = Settings(
 		api_token="token",
@@ -189,12 +351,22 @@ def test_workflow_produces_traceable_candidate(tmp_path: Path):
 			return results
 
 	class FakeDeepSeek:
+		def json(self, prompt, default, **kwargs):
+			return {
+				"intent": "lead_discovery",
+				"goal": "发现医疗行业线索",
+				"search_strategy": {"industry": "医疗"},
+				"required_tools": list(workflow.DEFAULT_TOOL_PLAN),
+				"requires_final_review": True,
+			}
+
 		def review(self, prompt, **kwargs):
 			return []
 
 	class FakeRouter:
-		def decide(self, state, *, tools, required_tool):
-			if required_tool:
+		def decide(self, state, *, tools, eligible_tools):
+			if eligible_tools:
+				required_tool = eligible_tools[0]
 				return AgentDecision(
 					type="tool_call",
 					tool_call=AgentToolCall(id=f"call-{required_tool}", name=required_tool, arguments={}),
@@ -208,10 +380,11 @@ def test_workflow_produces_traceable_candidate(tmp_path: Path):
 	workflow.deepseek = FakeDeepSeek()
 	workflow.router = FakeRouter()
 	state = workflow.run(run["run_id"], run["payload"])
+	assert state["planning_model"] == "deepseek"
 	assert state["criteria"]["industry"] == "医疗"
 	assert state["candidates"][0]["fingerprint"]
 	assert "1 条" in state["summary"]
 	trace = store.trace(run["run_id"])
-	assert [row["tool_name"] for row in trace["tools"]] == list(workflow.TOOL_SEQUENCE)
+	assert [row["tool_name"] for row in trace["tools"]] == list(workflow.DEFAULT_TOOL_PLAN)
 	assert all(row["status"] == "completed" for row in trace["tools"])
 	workflow.close()

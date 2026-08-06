@@ -108,6 +108,16 @@ def test_candidate_source_url_supports_long_public_links():
 	assert '"source_url": item.get("source_url")' in service
 
 
+def test_new_lead_tasks_use_v2_planning_status():
+	task_schema_path = DOCTYPE_ROOT / "i_one_lead_discovery_task" / "i_one_lead_discovery_task.json"
+	task_schema = json.loads(task_schema_path.read_text(encoding="utf-8"))
+	fields = {field["fieldname"]: field for field in task_schema["fields"]}
+	assert "正在规划" in fields["status"]["options"]
+	service = LEAD_SERVICE.read_text(encoding="utf-8")
+	assert '"planning": "正在规划"' in service
+	assert '"graph_version": "lead-agent-v2"' in service
+
+
 def test_terminal_lead_run_reports_frappe_sync_completion():
 	api = AGENT_API.read_text(encoding="utf-8")
 	assert "候选线索已写入 Frappe，部分结果待人工复核" in api

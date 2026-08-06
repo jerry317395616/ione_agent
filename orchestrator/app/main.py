@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import PlainTextResponse
 
 from app.clients import QwenClient
+from app.contracts import GRAPH_VERSION
 from app.models import ClassifyRequest, CreateRunRequest
 from app.settings import Settings
 from app.store import RunStore, utc_now
@@ -41,6 +42,14 @@ async def execute(run_id: str) -> None:
 		state = await asyncio.to_thread(workflow.run, run_id, run["payload"])
 		partial = bool(state.get("partial")) or state.get("status") == "partial"
 		result = {
+			"intent": state.get("intent") or {},
+			"goal": state.get("goal") or run["payload"].get("request"),
+			"plan": state.get("plan") or [],
+			"planning_model": state.get("planning_model") or "",
+			"planning_error": state.get("planning_error") or "",
+			"search_strategy": state.get("search_strategy") or {},
+			"completion_criteria": state.get("completion_criteria") or {},
+			"completion_evaluation": state.get("completion_evaluation") or {},
 			"criteria": state.get("criteria") or {},
 			"candidates": state.get("candidates") or [],
 			"summary": state.get("summary") or "AI 获客任务已完成。",
@@ -115,7 +124,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
 	title="I-ONE Lead Intelligence Orchestrator",
 	description="LangGraph orchestration for verifiable lead discovery",
-	version="0.4.0",
+	version="0.5.0",
 	lifespan=lifespan,
 )
 
@@ -125,9 +134,11 @@ def health() -> dict:
 	return {
 		"status": "healthy",
 		"runtime": "LangGraph",
-		"graph_version": "lead-agent-v1",
+		"graph_version": GRAPH_VERSION,
 		"checkpoint_backend": workflow.checkpoint_backend,
-		"control_model": settings.agent_control_model,
+		"planning_model": "deepseek",
+		"planning_fallback_model": "qwen",
+		"control_model": "qwen",
 		"model": settings.qwen_model,
 		"hermes": "configured" if settings.hermes_api_key else "unavailable",
 		"deepseek": workflow.deepseek.health() if settings.deepseek_token else {"state": "unavailable"},
@@ -166,6 +177,8 @@ def classify(request: ClassifyRequest) -> dict:
 			"判断用户请求属于 lead_discovery（联网找招标、采购或销售线索）还是 desktop（其他桌面任务）。只输出 JSON。",
 			f'{{"message": {message!r}, "schema": {{"intent": "lead_discovery|desktop", "confidence": "0-1"}}}}',
 			{"intent": "desktop", "confidence": 0},
+			timeout=6,
+			max_attempts=1,
 		)
 		intent = result.get("intent") if isinstance(result, dict) else "desktop"
 		return {"intent": intent if intent in {"lead_discovery", "desktop"} else "desktop", "confidence": result.get("confidence", 0)}
@@ -175,7 +188,9 @@ def classify(request: ClassifyRequest) -> dict:
 
 @app.post("/v1/runs", dependencies=[Depends(authorize)])
 async def create_run(request: CreateRunRequest) -> dict:
-	run = store.create(request.model_dump())
+	payload = request.model_dump()
+	payload["graph_version"] = GRAPH_VERSION
+	run = store.create(payload)
 	if run["status"] == "queued":
 		await enqueue(run["run_id"])
 	return run

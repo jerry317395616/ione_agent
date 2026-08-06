@@ -6,18 +6,17 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from app.clients import DeepSeekClient, QwenClient
+from app.clients import QwenClient
 from app.contracts import AgentDecision, AgentToolCall, LeadAgentState
 from app.settings import Settings
 
 
 class ModelRouter:
-	"""Use a stable controller model and automatically degrade from the web model."""
+	"""Use Qwen as the stable execution controller after the planning node."""
 
-	def __init__(self, settings: Settings, qwen: QwenClient, deepseek: DeepSeekClient) -> None:
+	def __init__(self, settings: Settings, qwen: QwenClient) -> None:
 		self.settings = settings
 		self.qwen = qwen
-		self.deepseek = deepseek
 
 	@staticmethod
 	def _normalize(payload: Any) -> dict[str, Any]:
@@ -44,7 +43,10 @@ class ModelRouter:
 			"run_id": state.get("run_id"),
 			"request": state.get("request"),
 			"intent": state.get("intent") or {},
+			"goal": state.get("goal") or "",
 			"plan": state.get("plan") or [],
+			"planning_model": state.get("planning_model") or "",
+			"completion_criteria": state.get("completion_criteria") or {},
 			"completed_tools": state.get("completed_tools") or [],
 			"iteration_count": state.get("iteration_count", 0),
 			"criteria": criteria,
@@ -63,56 +65,49 @@ class ModelRouter:
 		state: LeadAgentState,
 		*,
 		tools: list[dict[str, Any]],
-		required_tool: str | None,
+		eligible_tools: list[str],
 	) -> AgentDecision:
 		instructions = (
-			"你是 I-ONE Agent 的生产级控制模型。你只负责决定下一步，不执行工具。"
+			"你是 I-ONE Agent 的生产级执行控制模型。DeepSeek 已经完成首次规划，"
+			"你只负责根据当前状态决定下一步，不执行工具。"
 			"每次只允许调用一个白名单工具。只输出 JSON，不要 Markdown。"
 			"调用工具时输出 {\"type\":\"tool_call\",\"tool_call\":{\"id\":\"call_x\","
 			"\"name\":\"工具名\",\"arguments\":{}} ,\"reason\":\"简短原因\"}。"
 			"任务完成时输出 {\"type\":\"answer\",\"content\":\"最终回答\",\"reason\":\"\"}。"
-			"不得输出未注册工具，不得生成代码、Shell、SQL 或网址调用。"
+			"只能从 eligible_tools 中选择工具，不得输出未注册工具，不得生成代码、Shell、SQL 或网址调用。"
+			"eligible_tools 非空时不得提前回答；为空时返回最终回答。"
 		)
 		payload = {
 			"state": self._context(state),
-			"required_next_tool": required_tool,
+			"eligible_tools": eligible_tools,
 			"available_tools": tools,
 		}
 		user = json.dumps(payload, ensure_ascii=False)
 		raw: Any = {}
-		if self.settings.agent_control_model == "deepseek":
-			try:
-				raw = self.deepseek.json(
-					f"{instructions}\n{user}",
-					{},
-					run_id=state.get("run_id"),
-					purpose="agent_control",
-				)
-			except Exception:
-				raw = {}
-		if not raw:
-			try:
-				raw = self.qwen.json(
-					instructions,
-					user,
-					{},
-					run_id=state.get("run_id"),
-					purpose="agent_control",
-				)
-			except Exception:
-				raw = {}
+		try:
+			raw = self.qwen.json(
+				instructions,
+				user,
+				{},
+				timeout=60,
+				max_attempts=1,
+				run_id=state.get("run_id"),
+				purpose="agent_control",
+			)
+		except Exception:
+			raw = {}
 		try:
 			return AgentDecision.model_validate(self._normalize(raw))
 		except ValidationError:
-			if required_tool:
+			if eligible_tools:
 				return AgentDecision(
 					type="tool_call",
 					tool_call=AgentToolCall(
 						id=f"call_{uuid4().hex[:16]}",
-						name=required_tool,
+						name=eligible_tools[0],
 						arguments={},
 					),
-					reason="模型输出未通过结构校验，按受控计划继续。",
+					reason="控制模型输出未通过结构校验，按已验证计划继续。",
 				)
 			return AgentDecision(
 				type="answer",

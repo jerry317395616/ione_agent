@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
@@ -51,18 +51,41 @@ class CompleteDiscoveryArguments(ToolArguments):
 	pass
 
 
+class PlanCompletionCriteria(BaseModel):
+	minimum_verified_sources: int = Field(default=10, ge=1, le=100)
+	minimum_qualified_leads: int = Field(default=3, ge=0, le=100)
+	maximum_search_rounds: int = Field(default=1, ge=1, le=3)
+
+
+class InitialExecutionPlan(BaseModel):
+	intent: str = Field(default="lead_discovery", min_length=1, max_length=80)
+	goal: str = Field(min_length=1, max_length=1000)
+	search_strategy: dict[str, Any] = Field(default_factory=dict)
+	required_tools: list[str] = Field(default_factory=list, max_length=20)
+	completion_criteria: PlanCompletionCriteria = Field(default_factory=PlanCompletionCriteria)
+	requires_final_review: bool = True
+	rationale: str = Field(default="", max_length=2000)
+
+
 class Stopped(RuntimeError):
 	pass
 
 
 class LeadWorkflow:
-	TOOL_SEQUENCE = (
+	DEFAULT_TOOL_PLAN: ClassVar[tuple[str, ...]] = (
 		"parse_lead_request",
 		"search_public_tenders",
 		"analyze_lead_candidates",
 		"review_qualified_leads",
 		"complete_lead_discovery",
 	)
+	TOOL_DEPENDENCIES: ClassVar[dict[str, frozenset[str]]] = {
+		"parse_lead_request": frozenset(),
+		"search_public_tenders": frozenset({"parse_lead_request"}),
+		"analyze_lead_candidates": frozenset({"search_public_tenders"}),
+		"review_qualified_leads": frozenset({"analyze_lead_candidates"}),
+		"complete_lead_discovery": frozenset({"analyze_lead_candidates"}),
+	}
 
 	def __init__(self, settings: Settings, store: RunStore) -> None:
 		self.settings = settings
@@ -72,17 +95,19 @@ class LeadWorkflow:
 		self.searxng = SearxngClient(settings)
 		self.extractor = WebPageExtractor(settings)
 		self.deepseek = DeepSeekClient(settings, audit=store.record_model_call)
-		self.router = ModelRouter(settings, self.qwen, self.deepseek)
+		self.router = ModelRouter(settings, self.qwen)
 		self.registry = self._build_registry()
 		self.tool_node = GovernedToolNode(self.registry, ToolPolicy(), store)
 
 		builder = StateGraph(LeadAgentState)
 		builder.add_node("initialize", self.initialize)
+		builder.add_node("planner", self.create_initial_plan)
 		builder.add_node("model", self.model)
 		builder.add_node("tools", self.tool_node)
 		builder.add_node("finalize", self.finalize)
 		builder.add_edge(START, "initialize")
-		builder.add_edge("initialize", "model")
+		builder.add_edge("initialize", "planner")
+		builder.add_edge("planner", "model")
 		builder.add_conditional_edges("model", self.route_model, {"tools": "tools", "finalize": "finalize"})
 		builder.add_edge("tools", "model")
 		builder.add_edge("finalize", END)
@@ -167,7 +192,13 @@ class LeadWorkflow:
 			"graph_version": GRAPH_VERSION,
 			"messages": [{"role": "user", "content": state["request"]}],
 			"intent": {"name": "lead_discovery", "confidence": 1.0},
-			"plan": list(self.TOOL_SEQUENCE),
+			"plan": [],
+			"planning_complete": False,
+			"planning_model": "",
+			"planning_error": "",
+			"goal": state["request"][:1000],
+			"search_strategy": {},
+			"completion_criteria": {},
 			"completed_tools": [],
 			"tool_results": [],
 			"evidence": [],
@@ -182,9 +213,171 @@ class LeadWorkflow:
 			"partial": False,
 		}
 
-	def _required_tool(self, state: LeadAgentState) -> str | None:
+	def _fallback_initial_plan(self, state: LeadAgentState) -> dict[str, Any]:
+		profile = dict(state.get("profile") or {})
+		maximum_results = max(1, min(100, int(profile.get("maximum_results") or 30)))
+		return {
+			"intent": "lead_discovery",
+			"goal": str(state.get("request") or "发现并分析公开业务线索")[:1000],
+			"search_strategy": {
+				"industry": profile.get("industry"),
+				"regions": profile.get("regions") or [],
+				"keywords": profile.get("keywords") or [],
+				"days_back": profile.get("days_back") or 30,
+				"maximum_results": maximum_results,
+			},
+			"required_tools": list(self.DEFAULT_TOOL_PLAN),
+			"completion_criteria": {
+				"minimum_verified_sources": min(10, maximum_results),
+				"minimum_qualified_leads": min(3, maximum_results),
+				"maximum_search_rounds": 1,
+			},
+			"requires_final_review": True,
+			"rationale": "使用安全的默认获客计划继续执行。",
+		}
+
+	def _normalize_initial_plan(
+		self,
+		payload: Any,
+		state: LeadAgentState,
+	) -> InitialExecutionPlan:
+		if isinstance(payload, dict) and isinstance(payload.get("plan"), dict):
+			payload = payload["plan"]
+		plan = InitialExecutionPlan.model_validate(payload)
+		allowed = set(self.registry.names())
+		requested = [name for name in plan.required_tools if name in allowed]
+		for required in (
+			"parse_lead_request",
+			"search_public_tenders",
+			"analyze_lead_candidates",
+			"complete_lead_discovery",
+		):
+			if required not in requested:
+				requested.append(required)
+		if plan.requires_final_review and "review_qualified_leads" not in requested:
+			requested.append("review_qualified_leads")
+		requested_set = set(requested)
+		for name in tuple(requested):
+			requested_set.update(self.TOOL_DEPENDENCIES.get(name, ()))
+		ordered = [name for name in self.DEFAULT_TOOL_PLAN if name in requested_set]
+		if not ordered:
+			raise ValueError("执行计划没有可用工具")
+		plan.required_tools = ordered
+		plan.search_strategy = {
+			**dict(state.get("profile") or {}),
+			**dict(plan.search_strategy or {}),
+		}
+		return plan
+
+	def create_initial_plan(self, state: LeadAgentState) -> dict[str, Any]:
+		self.ensure_running(state["run_id"])
+		if state.get("planning_complete"):
+			return {}
+		run_id = state["run_id"]
+		fallback = self._fallback_initial_plan(state)
+		planning_payload = {
+			"today": date.today().isoformat(),
+			"request": state.get("request"),
+			"saved_profile": state.get("profile") or {},
+			"trusted_sources": state.get("sources") or [],
+			"available_tools": self.registry.definitions(),
+			"required_schema": {
+				"intent": "lead_discovery",
+				"goal": "string",
+				"search_strategy": {
+					"industry": "string|null",
+					"regions": ["string"],
+					"keywords": ["string"],
+					"days_back": "integer",
+					"maximum_results": "integer",
+				},
+				"required_tools": ["registered tool name"],
+				"completion_criteria": {
+					"minimum_verified_sources": "integer",
+					"minimum_qualified_leads": "integer",
+					"maximum_search_rounds": "integer",
+				},
+				"requires_final_review": "boolean",
+				"rationale": "string",
+			},
+		}
+		prompt = (
+			"你是 I-ONE Agent 的首席任务规划模型。请先理解用户目标，再生成生产级执行计划。"
+			"只输出一个符合 required_schema 的 JSON 对象，不要 Markdown。"
+			"只能使用 available_tools 中的工具，不得生成代码、Shell、SQL 或虚构数据。"
+			"计划必须包含需求解析、公开信息检索、证据分析和完成步骤；需要售前方案时启用最终复核。\n"
+			+ json.dumps(planning_payload, ensure_ascii=False)
+		)
+		self.store.stage(run_id, "planning", 7, "DeepSeek 正在理解目标并制定执行计划", deepseek="正在规划")
+		planning_model = "deepseek"
+		planning_errors: list[str] = []
+		try:
+			raw_plan = self.deepseek.json(
+				prompt,
+				{},
+				timeout=self.settings.deepseek_planning_timeout_seconds,
+				run_id=run_id,
+				purpose="lead_initial_planning",
+			)
+			plan = self._normalize_initial_plan(raw_plan, state)
+		except Exception as exc:
+			planning_errors.append(f"DeepSeek {type(exc).__name__}: {exc}")
+			planning_model = "qwen"
+			self.store.stage(
+				run_id,
+				"planning",
+				8,
+				f"DeepSeek 规划暂不可用，正在降级 Qwen：{type(exc).__name__}",
+				deepseek="规划失败，已降级",
+				qwen="正在接管规划",
+			)
+			try:
+				raw_plan = self.qwen.json(
+					"你是企业任务规划模型。只根据输入生成严格 JSON 执行计划，不执行工具、不编造信息。",
+					json.dumps(planning_payload, ensure_ascii=False),
+					{},
+					timeout=90,
+					max_attempts=1,
+					run_id=run_id,
+					purpose="lead_initial_planning_fallback",
+				)
+				plan = self._normalize_initial_plan(raw_plan, state)
+			except Exception as fallback_exc:
+				planning_errors.append(f"Qwen {type(fallback_exc).__name__}: {fallback_exc}")
+				planning_model = "deterministic"
+				plan = self._normalize_initial_plan(fallback, state)
+		self.store.stage(
+			run_id,
+			"planning",
+			10,
+			f"执行计划已生成，规划模型：{planning_model}",
+			deepseek="规划完成" if planning_model == "deepseek" else "已降级",
+			qwen="规划完成" if planning_model == "qwen" else "等待执行",
+		)
+		return {
+			"planning_complete": True,
+			"planning_model": planning_model,
+			"planning_error": "\n".join(planning_errors)[:4000],
+			"intent": {"name": plan.intent, "confidence": 1.0},
+			"goal": plan.goal,
+			"search_strategy": plan.search_strategy,
+			"completion_criteria": plan.completion_criteria.model_dump(mode="json"),
+			"plan": plan.required_tools,
+		}
+
+	def _eligible_tools(self, state: LeadAgentState) -> list[str]:
 		completed = set(state.get("completed_tools") or [])
-		return next((name for name in self.TOOL_SEQUENCE if name not in completed), None)
+		plan = state.get("plan") or list(self.DEFAULT_TOOL_PLAN)
+		eligible = []
+		for name in plan:
+			if name in completed or name not in self.TOOL_DEPENDENCIES:
+				continue
+			dependencies = self.TOOL_DEPENDENCIES[name]
+			if name == "complete_lead_discovery" and "review_qualified_leads" in plan:
+				dependencies = dependencies | {"review_qualified_leads"}
+			if dependencies.issubset(completed):
+				eligible.append(name)
+		return eligible
 
 	def _default_arguments(self, name: str, state: LeadAgentState) -> dict[str, Any]:
 		if name == "parse_lead_request":
@@ -205,7 +398,7 @@ class LeadWorkflow:
 
 	def model(self, state: LeadAgentState) -> dict[str, Any]:
 		self.ensure_running(state["run_id"])
-		required = self._required_tool(state)
+		eligible = self._eligible_tools(state)
 		if self._budget_exhausted(state):
 			summary = state.get("summary") or self._summary(state)
 			return {
@@ -218,10 +411,10 @@ class LeadWorkflow:
 
 		decision = self.router.decide(
 			state,
-			tools=self.registry.definitions(),
-			required_tool=required,
+			tools=[item for item in self.registry.definitions() if item["name"] in eligible],
+			eligible_tools=eligible,
 		)
-		decision = self._guard_decision(decision, required, state)
+		decision = self._guard_decision(decision, eligible, state)
 		iteration = int(state.get("iteration_count") or 0) + 1
 		self.store.update(
 			state["run_id"],
@@ -254,6 +447,7 @@ class LeadWorkflow:
 		)
 		return {
 			"pending_tool_call": call.model_dump(mode="json"),
+			"eligible_tools": eligible,
 			"messages": messages[-60:],
 			"iteration_count": iteration,
 			"status": "running",
@@ -262,10 +456,10 @@ class LeadWorkflow:
 	def _guard_decision(
 		self,
 		decision: AgentDecision,
-		required_tool: str | None,
+		eligible_tools: list[str],
 		state: LeadAgentState,
 	) -> AgentDecision:
-		if not required_tool:
+		if not eligible_tools:
 			if decision.type == "answer":
 				return decision
 			return AgentDecision(
@@ -275,18 +469,19 @@ class LeadWorkflow:
 			)
 
 		call = decision.tool_call
-		if decision.type != "tool_call" or not call or call.name != required_tool:
+		if decision.type != "tool_call" or not call or call.name not in eligible_tools:
+			fallback_tool = eligible_tools[0]
 			call = AgentToolCall(
 				id=f"call_{uuid4().hex[:16]}",
-				name=required_tool,
-				arguments=self._default_arguments(required_tool, state),
+				name=fallback_tool,
+				arguments=self._default_arguments(fallback_tool, state),
 			)
 			return AgentDecision(
 				type="tool_call",
 				tool_call=call,
-				reason="策略守卫按可恢复计划选择下一项必要工具。",
+				reason="策略守卫从当前满足依赖条件的计划工具中选择下一步。",
 			)
-		defaults = self._default_arguments(required_tool, state)
+		defaults = self._default_arguments(call.name, state)
 		call.arguments = {**defaults, **call.arguments}
 		return decision
 
@@ -303,34 +498,53 @@ class LeadWorkflow:
 		self.ensure_running(run_id)
 		self.store.stage(run_id, "parsing", 12, "Qwen 正在理解获客目标", qwen="正在解析")
 		profile = state.get("profile") or {}
-		criteria = self.qwen.json(
-			"你是企业获客任务解析器。只输出一个 JSON 对象，不要解释。未知信息使用 null，不得编造。",
-			json.dumps(
-				{
-					"today": date.today().isoformat(),
-					"request": arguments.request or state["request"],
-					"saved_profile": profile,
-					"required_schema": {
-						"industry": "string",
-						"regions": ["string"],
-						"keywords": ["string"],
-						"excluded_keywords": ["string"],
-						"days_back": "integer",
-						"minimum_budget": "number",
-						"maximum_results": "integer",
-						"score_threshold": "number",
+		partial = bool(state.get("partial"))
+		try:
+			criteria = self.qwen.json(
+				"你是企业获客任务解析器。只输出一个 JSON 对象，不要解释。未知信息使用 null，不得编造。",
+				json.dumps(
+					{
+						"today": date.today().isoformat(),
+						"request": arguments.request or state["request"],
+						"saved_profile": profile,
+						"deepseek_plan": state.get("search_strategy") or {},
+						"required_schema": {
+							"industry": "string",
+							"regions": ["string"],
+							"keywords": ["string"],
+							"excluded_keywords": ["string"],
+							"days_back": "integer",
+							"minimum_budget": "number",
+							"maximum_results": "integer",
+							"score_threshold": "number",
+						},
 					},
-				},
-				ensure_ascii=False,
-			),
-			{},
-			run_id=run_id,
-			purpose="parse_lead_criteria",
-		)
-		criteria = {**profile, **(criteria if isinstance(criteria, dict) else {})}
+					ensure_ascii=False,
+				),
+				{},
+				timeout=90,
+				max_attempts=1,
+				run_id=run_id,
+				purpose="parse_lead_criteria",
+			)
+		except Exception as exc:
+			partial = True
+			criteria = {}
+			self.store.stage(
+				run_id,
+				"parsing",
+				16,
+				f"Qwen 解析暂不可用，正在使用已验证的首次计划：{type(exc).__name__}",
+				qwen="解析已降级",
+			)
+		criteria = {
+			**profile,
+			**dict(state.get("search_strategy") or {}),
+			**(criteria if isinstance(criteria, dict) else {}),
+		}
 		criteria["maximum_results"] = max(1, min(100, int(criteria.get("maximum_results") or 30)))
 		criteria["score_threshold"] = max(0, min(100, float(criteria.get("score_threshold") or 70)))
-		return {"criteria": criteria}
+		return {"criteria": criteria, "partial": partial}
 
 	def research(
 		self,
@@ -441,6 +655,8 @@ class LeadWorkflow:
 					ensure_ascii=False,
 				),
 				[],
+				timeout=180,
+				max_attempts=1,
 				run_id=run_id,
 				purpose="analyze_lead_candidates",
 			)
@@ -635,9 +851,43 @@ class LeadWorkflow:
 		_arguments: CompleteDiscoveryArguments,
 	) -> dict[str, Any]:
 		self.ensure_running(state["run_id"])
-		summary = self._summary(state)
+		evaluation = self._evaluate_completion(state)
+		partial = bool(state.get("partial")) or not evaluation["met"]
+		summary = self._summary({**state, "partial": partial})
+		if evaluation["shortfalls"]:
+			summary += " 未满足的完成条件：" + "；".join(evaluation["shortfalls"]) + "。"
 		self.store.stage(state["run_id"], "syncing", 95, "正在将结构化结果交给 Frappe 入库")
-		return {"summary": summary, "final_answer": summary}
+		return {
+			"summary": summary,
+			"final_answer": summary,
+			"completion_evaluation": evaluation,
+			"partial": partial,
+		}
+
+	@staticmethod
+	def _evaluate_completion(state: LeadAgentState) -> dict[str, Any]:
+		candidates = state.get("candidates") or []
+		criteria = state.get("completion_criteria") or {}
+		score_threshold = float((state.get("criteria") or {}).get("score_threshold") or 70)
+		verified_sources = sum(
+			bool(item.get("source_url") and item.get("evidence")) for item in candidates
+		)
+		qualified_leads = sum(
+			float(item.get("relevance_score") or 0) >= score_threshold for item in candidates
+		)
+		minimum_sources = int(criteria.get("minimum_verified_sources") or 1)
+		minimum_leads = int(criteria.get("minimum_qualified_leads") or 0)
+		shortfalls = []
+		if verified_sources < minimum_sources:
+			shortfalls.append(f"可核验来源 {verified_sources}/{minimum_sources}")
+		if qualified_leads < minimum_leads:
+			shortfalls.append(f"合格线索 {qualified_leads}/{minimum_leads}")
+		return {
+			"met": not shortfalls,
+			"verified_sources": verified_sources,
+			"qualified_leads": qualified_leads,
+			"shortfalls": shortfalls,
+		}
 
 	@staticmethod
 	def _summary(state: LeadAgentState) -> str:

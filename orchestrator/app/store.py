@@ -47,7 +47,7 @@ class RunStore:
 				)
 				"""
 			)
-			self._ensure_column("runs", "graph_version", "TEXT NOT NULL DEFAULT 'lead-agent-v1'")
+			self._ensure_column("runs", "graph_version", "TEXT NOT NULL DEFAULT 'lead-agent-v2'")
 			self._ensure_column("runs", "tenant", "TEXT NOT NULL DEFAULT 'manager.myyr.top'")
 			self._ensure_column("runs", "iteration_count", "INTEGER NOT NULL DEFAULT 0")
 			self._ensure_column("runs", "last_checkpoint_at", "TEXT")
@@ -122,7 +122,7 @@ class RunStore:
 					payload["user_id"],
 					json.dumps(payload, ensure_ascii=False),
 					"等待执行",
-					payload.get("graph_version") or "lead-agent-v1",
+					payload.get("graph_version") or "lead-agent-v2",
 					payload.get("tenant") or "manager.myyr.top",
 					utc_now(),
 				),

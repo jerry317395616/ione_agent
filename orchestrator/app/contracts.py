@@ -8,7 +8,7 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
 
-GRAPH_VERSION = "lead-agent-v1"
+GRAPH_VERSION = "lead-agent-v2"
 
 
 class RiskLevel(str, Enum):
@@ -89,6 +89,14 @@ class LeadAgentState(TypedDict, total=False):
 	messages: list[dict[str, Any]]
 	intent: dict[str, Any]
 	plan: list[str]
+	planning_complete: bool
+	planning_model: str
+	planning_error: str
+	goal: str
+	search_strategy: dict[str, Any]
+	completion_criteria: dict[str, Any]
+	completion_evaluation: dict[str, Any]
+	eligible_tools: list[str]
 	completed_tools: list[str]
 	tool_results: list[dict[str, Any]]
 	pending_tool_call: dict[str, Any]

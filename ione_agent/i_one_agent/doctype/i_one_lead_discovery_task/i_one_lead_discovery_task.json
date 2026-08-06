@@ -8,7 +8,7 @@
  "fields": [
   {"fieldname":"profile","fieldtype":"Link","label":"获客配置","options":"I-ONE Lead Discovery Profile","in_list_view":1,"in_standard_filter":1},
   {"fieldname":"user","fieldtype":"Link","label":"发起人","options":"User","reqd":1,"in_list_view":1,"in_standard_filter":1},
-  {"fieldname":"status","fieldtype":"Select","label":"状态","options":"等待执行\n正在解析\n正在调研\n正在分析\n正在复核\n正在入库\n已完成\n部分完成\n失败\n已停止","default":"等待执行","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"status","fieldtype":"Select","label":"状态","options":"等待执行\n正在规划\n正在解析\n正在调研\n正在分析\n正在复核\n正在入库\n已完成\n部分完成\n失败\n已停止","default":"等待执行","reqd":1,"in_list_view":1,"in_standard_filter":1},
   {"fieldname":"progress","fieldtype":"Percent","label":"进度","default":"0","read_only":1},
   {"fieldname":"current_stage","fieldtype":"Data","label":"当前阶段","read_only":1},
   {"fieldname":"column_break","fieldtype":"Column Break"},

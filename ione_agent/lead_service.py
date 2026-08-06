@@ -16,6 +16,7 @@ CANDIDATE_DTYPE = "I-ONE Lead Candidate"
 
 TASK_STATUS_MAP = {
 	"queued": "等待执行",
+	"planning": "正在规划",
 	"parsing": "正在解析",
 	"researching": "正在调研",
 	"analyzing": "正在分析",
@@ -56,7 +57,7 @@ def build_discovery_payload(task, profile=None) -> dict[str, Any]:
 		"user_id": task.user,
 		"tenant": frappe.local.site,
 		"roles": frappe.get_roles(task.user),
-		"graph_version": "lead-agent-v1",
+		"graph_version": "lead-agent-v2",
 		"request": task.original_request,
 		"profile": configuration,
 		"sources": [dict(row) for row in sources],

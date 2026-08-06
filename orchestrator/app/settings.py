@@ -26,10 +26,10 @@ class Settings:
 	deepseek_token: str
 	max_concurrent_runs: int
 	search_http_proxy: str = ""
-	agent_control_model: str = "qwen"
 	max_agent_iterations: int = 12
 	agent_run_budget_seconds: int = 1800
 	hermes_request_timeout_seconds: int = 240
+	deepseek_planning_timeout_seconds: int = 90
 	deepseek_job_timeout_seconds: int = 180
 	deepseek_breaker_failures: int = 3
 	deepseek_breaker_cooldown_seconds: int = 300
@@ -37,9 +37,6 @@ class Settings:
 
 	@classmethod
 	def from_environment(cls) -> Settings:
-		control_model = os.getenv("IONE_AGENT_CONTROL_MODEL", "qwen").strip().lower()
-		if control_model not in {"qwen", "deepseek"}:
-			raise RuntimeError("IONE_AGENT_CONTROL_MODEL must be qwen or deepseek")
 		return cls(
 			api_token=required("IONE_ORCHESTRATOR_TOKEN"),
 			data_dir=Path(
@@ -55,13 +52,15 @@ class Settings:
 			deepseek_token=os.getenv("DEEPSEEK_REVIEW_TOKEN", "").strip(),
 			max_concurrent_runs=max(1, min(8, int(os.getenv("IONE_MAX_CONCURRENT_RUNS", "2")))),
 			search_http_proxy=os.getenv("SEARCH_HTTP_PROXY", "").strip(),
-			agent_control_model=control_model,
 			max_agent_iterations=max(6, min(30, int(os.getenv("IONE_AGENT_MAX_ITERATIONS", "12")))),
 			agent_run_budget_seconds=max(
 				300, min(7200, int(os.getenv("IONE_AGENT_RUN_BUDGET_SECONDS", "1800")))
 			),
 			hermes_request_timeout_seconds=max(
 				60, min(600, int(os.getenv("HERMES_REQUEST_TIMEOUT_SECONDS", "240")))
+			),
+			deepseek_planning_timeout_seconds=max(
+				30, min(120, int(os.getenv("DEEPSEEK_PLANNING_TIMEOUT_SECONDS", "90")))
 			),
 			deepseek_job_timeout_seconds=max(
 				60, min(1800, int(os.getenv("DEEPSEEK_JOB_TIMEOUT_SECONDS", "180")))

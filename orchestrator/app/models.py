@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.contracts import GRAPH_VERSION
+
 
 class ClassifyRequest(BaseModel):
 	message: str = Field(min_length=1, max_length=12000)
@@ -16,6 +18,6 @@ class CreateRunRequest(BaseModel):
 	request: str = Field(min_length=1, max_length=12000)
 	tenant: str = Field(default="manager.myyr.top", min_length=1, max_length=255)
 	roles: list[str] = Field(default_factory=list, max_length=100)
-	graph_version: str = Field(default="lead-agent-v1", min_length=1, max_length=80)
+	graph_version: str = Field(default=GRAPH_VERSION, min_length=1, max_length=80)
 	profile: dict[str, Any] = Field(default_factory=dict)
 	sources: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
