@@ -53,6 +53,7 @@ The orchestrator is deployed from `orchestrator/`. Copy `.env.example` to a prot
 - Qwen is the default controller because it exposes a stable OpenAI-compatible interface.
 - DeepSeek web can be selected with `IONE_AGENT_CONTROL_MODEL=deepseek`; malformed output or browser failure falls back to Qwen.
 - DeepSeek remains the specialist reviewer for qualified leads and uses an isolated browser conversation for every call.
+- Hermes only receives the requested candidate set with bounded source text. `HERMES_REQUEST_TIMEOUT_SECONDS` defaults to 240 seconds; a timeout preserves collected evidence and lets Qwen continue the run.
 - Every tool is versioned, allowlisted, validated and assigned a risk level before execution.
 - Tool side effects use a deterministic idempotency key and are recorded in the orchestrator audit database.
 - `/v1/runs/{run_id}/trace` exposes the authenticated model/tool trace and `/metrics` exposes operational counters.

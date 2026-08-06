@@ -147,7 +147,7 @@ class HermesClient:
 	def research(self, prompt: str) -> list[dict[str, Any]]:
 		if not self.settings.hermes_api_key:
 			raise RuntimeError("Hermes API key is not configured")
-		with httpx.Client(timeout=600) as client:
+		with httpx.Client(timeout=self.settings.hermes_request_timeout_seconds) as client:
 			response = client.post(
 				f"{self.settings.hermes_url}/v1/chat/completions",
 				headers={"Authorization": f"Bearer {self.settings.hermes_api_key}"},
@@ -156,7 +156,7 @@ class HermesClient:
 					"messages": [{"role": "user", "content": prompt}],
 					"stream": False,
 					"tool_choice": "none",
-					"max_tokens": 8000,
+					"max_tokens": 5000,
 				},
 			)
 			response.raise_for_status()

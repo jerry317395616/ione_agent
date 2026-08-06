@@ -8,6 +8,7 @@
 - Add DeepSeek circuit breaking, unique browser conversations and Qwen review fallback.
 - Add durable model/tool audit trails, authenticated run traces and Prometheus-style metrics.
 - Add PostgreSQL checkpoint support with SQLite WAL fallback for single-node deployments.
+- Bound Hermes context and request duration so collected evidence can continue through Qwen when research is slow.
 
 ## 0.3.0
 

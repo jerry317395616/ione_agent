@@ -350,6 +350,12 @@ class LeadWorkflow:
 		self.store.stage(run_id, "researching", 38, f"已发现 {len(raw)} 条公开信息，正在抓取原文证据")
 		raw = self.extractor.enrich(raw, limit=min(12, int(criteria["maximum_results"])))
 		self.ensure_running(run_id)
+		hermes_limit = min(12, int(criteria["maximum_results"]))
+		hermes_materials = [
+			{key: value for key, value in item.items() if key != "raw_text"}
+			| {"raw_text": str(item.get("raw_text") or "")[:6000]}
+			for item in raw[:hermes_limit]
+		]
 		prompt = (
 			"你是 I-ONE 行业情报研究员。以下素材已由受控采集器联网搜索并抓取原文。"
 			"禁止继续调用搜索、浏览器、终端或其他工具，只能根据给定素材完成核验和整理。"
@@ -359,7 +365,7 @@ class LeadWorkflow:
 			"industry,procurement_method,raw_text,evidence。evidence 是包含 url、snippet 的数组。\n"
 			f"任务：{state['request']}\n条件：{json.dumps(criteria, ensure_ascii=False)}\n"
 			f"优先来源：{json.dumps(sources, ensure_ascii=False)}\n"
-			f"已采集素材：{json.dumps(raw[:12], ensure_ascii=False)}"
+			f"已采集素材：{json.dumps(hermes_materials, ensure_ascii=False)}"
 		)
 		partial = bool(state.get("partial"))
 		if raw:

@@ -29,6 +29,7 @@ class Settings:
 	agent_control_model: str = "qwen"
 	max_agent_iterations: int = 12
 	agent_run_budget_seconds: int = 1800
+	hermes_request_timeout_seconds: int = 240
 	deepseek_job_timeout_seconds: int = 900
 	deepseek_breaker_failures: int = 3
 	deepseek_breaker_cooldown_seconds: int = 300
@@ -58,6 +59,9 @@ class Settings:
 			max_agent_iterations=max(6, min(30, int(os.getenv("IONE_AGENT_MAX_ITERATIONS", "12")))),
 			agent_run_budget_seconds=max(
 				300, min(7200, int(os.getenv("IONE_AGENT_RUN_BUDGET_SECONDS", "1800")))
+			),
+			hermes_request_timeout_seconds=max(
+				60, min(600, int(os.getenv("HERMES_REQUEST_TIMEOUT_SECONDS", "240")))
 			),
 			deepseek_job_timeout_seconds=max(
 				60, min(1800, int(os.getenv("DEEPSEEK_JOB_TIMEOUT_SECONDS", "900")))
