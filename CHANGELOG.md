@@ -5,6 +5,7 @@
 - Add a dedicated DeepSeek-first planning node before the LangGraph model/tool loop.
 - Persist the validated goal, search strategy, tool plan, completion criteria and planning provider in graph state and run results.
 - Fall back from bounded DeepSeek planning to one Qwen attempt and then to a deterministic safe plan.
+- Keep the DeepSeek planning response compact so browser-relay output limits do not truncate the JSON plan.
 - Make Qwen the sole execution controller and restrict its choices to plan-approved tools with satisfied dependencies.
 - Upgrade new lead runs to graph version `lead-agent-v2` while retaining checkpoint compatibility for existing runs.
 

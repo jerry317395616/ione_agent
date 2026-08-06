@@ -280,7 +280,10 @@ class LeadWorkflow:
 			"request": state.get("request"),
 			"saved_profile": state.get("profile") or {},
 			"trusted_sources": state.get("sources") or [],
-			"available_tools": self.registry.definitions(),
+			"available_tools": [
+				{"name": item["name"], "description": item["description"]}
+				for item in self.registry.definitions()
+			],
 			"required_schema": {
 				"intent": "lead_discovery",
 				"goal": "string",
@@ -298,12 +301,12 @@ class LeadWorkflow:
 					"maximum_search_rounds": "integer",
 				},
 				"requires_final_review": "boolean",
-				"rationale": "string",
 			},
 		}
 		prompt = (
 			"你是 I-ONE Agent 的首席任务规划模型。请先理解用户目标，再生成生产级执行计划。"
-			"只输出一个符合 required_schema 的 JSON 对象，不要 Markdown。"
+			"只输出一个符合 required_schema 的紧凑 JSON 对象，不要 Markdown，不要 rationale 或其他解释。"
+			"goal 不超过60个汉字，keywords 不超过6个。"
 			"只能使用 available_tools 中的工具，不得生成代码、Shell、SQL 或虚构数据。"
 			"计划必须包含需求解析、公开信息检索、证据分析和完成步骤；需要售前方案时启用最终复核。\n"
 			+ json.dumps(planning_payload, ensure_ascii=False)
