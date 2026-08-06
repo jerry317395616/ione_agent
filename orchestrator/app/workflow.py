@@ -126,7 +126,7 @@ class LeadWorkflow:
 				version="1.0.0",
 				description="依据公开证据提取需求、评估相关度与可信度并去重。",
 				argument_model=AnalyzeCandidatesArguments,
-				max_attempts=2,
+				max_attempts=1,
 			),
 			self.analyze,
 		)
@@ -424,26 +424,39 @@ class LeadWorkflow:
 			| {"raw_text": str(item.get("raw_text") or "")[:4000]}
 			for item in raw
 		]
-		analyzed = self.qwen.json(
-			"你是严谨的招标线索分析师。只使用输入证据，禁止补造。只输出 JSON 数组。",
-			json.dumps(
-				{
-					"criteria": criteria,
-					"candidates": compact,
-					"instructions": (
-						"保留输入字段，并新增 relevance_score(0-100)、confidence(0-100)、risk_level(低/中/高)、"
-						"requirement_summary、qualification_requirements、recommendation。来源网址为空的记录必须删除；"
-						"明显过期、重复或与行业无关的记录删除。日期统一 ISO 8601，预算统一为人民币数值。"
-					),
-				},
-				ensure_ascii=False,
-			),
-			[],
-			run_id=run_id,
-			purpose="analyze_lead_candidates",
-		)
-		if not isinstance(analyzed, list):
-			raise RuntimeError("Qwen 未返回候选线索数组")
+		partial = bool(state.get("partial"))
+		try:
+			analyzed = self.qwen.json(
+				"你是严谨的招标线索分析师。只使用输入证据，禁止补造。只输出 JSON 数组。",
+				json.dumps(
+					{
+						"criteria": criteria,
+						"candidates": compact,
+						"instructions": (
+							"保留输入字段，并新增 relevance_score(0-100)、confidence(0-100)、risk_level(低/中/高)、"
+							"requirement_summary、qualification_requirements、recommendation。来源网址为空的记录必须删除；"
+							"明显过期、重复或与行业无关的记录删除。日期统一 ISO 8601，预算统一为人民币数值。"
+						),
+					},
+					ensure_ascii=False,
+				),
+				[],
+				run_id=run_id,
+				purpose="analyze_lead_candidates",
+			)
+		except Exception as exc:
+			partial = True
+			self.store.stage(
+				run_id,
+				"analyzing",
+				62,
+				f"Qwen 暂不可用，正在依据已核验证据保守评分：{type(exc).__name__}",
+				qwen="已降级",
+			)
+			analyzed = self._fallback_analysis(raw, criteria)
+		if not isinstance(analyzed, list) or (not analyzed and raw):
+			partial = True
+			analyzed = self._fallback_analysis(raw, criteria)
 		seen: set[str] = set()
 		candidates = []
 		for item in analyzed:
@@ -463,7 +476,43 @@ class LeadWorkflow:
 			item["fingerprint"] = fingerprint
 			candidates.append(item)
 		self.store.stage(run_id, "analyzing", 70, f"已形成 {len(candidates)} 条可追溯候选线索", qwen="已完成")
-		return {"criteria": criteria, "candidates": candidates}
+		return {"criteria": criteria, "candidates": candidates, "partial": partial}
+
+	@staticmethod
+	def _fallback_analysis(raw: list[dict[str, Any]], criteria: dict[str, Any]) -> list[dict[str, Any]]:
+		industry = str(criteria.get("industry") or "").strip().lower()
+		keywords = [str(value).strip().lower() for value in criteria.get("keywords") or [] if value]
+		fallback = []
+		for source in raw:
+			url = str(source.get("source_url") or "").strip()
+			if not url:
+				continue
+			text = " ".join(
+				str(source.get(key) or "") for key in ("title", "raw_text", "industry", "purchaser")
+			).lower()
+			official = any(marker in url.lower() for marker in (".gov.cn", "ccgp.gov.cn"))
+			matched_keywords = sum(keyword in text for keyword in keywords)
+			score = 50
+			if industry and industry in text:
+				score += 20
+			score += min(20, matched_keywords * 8)
+			if official:
+				score += 10
+			if source.get("evidence"):
+				score += 5
+			item = dict(source)
+			item.update(
+				{
+					"relevance_score": min(100, score),
+					"confidence": 70 if official and source.get("evidence") else 50,
+					"risk_level": "中",
+					"requirement_summary": str(source.get("raw_text") or source.get("title") or "")[:500],
+					"qualification_requirements": source.get("qualification_requirements") or "待获取招标文件核验",
+					"recommendation": "本地模型繁忙，已依据公开证据完成保守评分，建议人工复核后跟进。",
+				}
+			)
+			fallback.append(item)
+		return fallback
 
 	def review(
 		self,

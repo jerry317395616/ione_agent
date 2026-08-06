@@ -57,6 +57,24 @@ def test_store_is_idempotent_and_persists_result(tmp_path: Path):
 	assert store.get(first["run_id"])["result"]["candidates"][0]["title"] == "A"
 
 
+def test_fallback_analysis_preserves_verified_evidence():
+	items = LeadWorkflow._fallback_analysis(
+		[
+			{
+				"title": "医院信息化建设公开招标公告",
+				"source_url": "https://www.ccgp.gov.cn/tender/1",
+				"raw_text": "某医院采购医保智能审核系统",
+				"evidence": [{"url": "https://www.ccgp.gov.cn/tender/1", "snippet": "公告"}],
+			}
+		],
+		{"industry": "医疗信息化", "keywords": ["医保智能审核"]},
+	)
+	assert items[0]["source_url"].startswith("https://www.ccgp.gov.cn")
+	assert items[0]["evidence"]
+	assert items[0]["relevance_score"] >= 70
+	assert items[0]["risk_level"] == "中"
+
+
 def test_workflow_produces_traceable_candidate(tmp_path: Path):
 	settings = Settings(
 		api_token="token",

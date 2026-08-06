@@ -9,6 +9,7 @@
 - Add durable model/tool audit trails, authenticated run traces and Prometheus-style metrics.
 - Add PostgreSQL checkpoint support with SQLite WAL fallback for single-node deployments.
 - Bound Hermes context and request duration so collected evidence can continue through Qwen when research is slow.
+- Remove nested analysis retries and preserve verified candidates with conservative scoring when Qwen is temporarily unavailable.
 
 ## 0.3.0
 
