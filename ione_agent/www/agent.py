@@ -4,6 +4,7 @@ import frappe
 
 from ione_agent import __version__
 from ione_agent.permissions import has_app_permission
+from ione_agent.sso import create_login_url
 
 no_cache = 1
 
@@ -17,7 +18,7 @@ def get_context(context):
 
 	frontend_url = str(frappe.conf.get("ione_agent_frontend_url") or "").strip()
 	if frontend_url:
-		frappe.local.flags.redirect_location = frontend_url
+		frappe.local.flags.redirect_location = create_login_url()
 		raise frappe.Redirect
 
 	context.no_cache = 1

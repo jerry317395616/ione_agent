@@ -14,8 +14,8 @@ def _is_manager(user: str | None = None) -> bool:
 	return bool(MANAGER_ROLES.intersection(frappe.get_roles(_user(user))))
 
 
-def has_app_permission() -> bool:
-	user = _user()
+def has_app_permission(user: str | None = None) -> bool:
+	user = _user(user)
 	return user not in {"Guest", ""} and bool(APP_ROLES.intersection(frappe.get_roles(user)))
 
 
