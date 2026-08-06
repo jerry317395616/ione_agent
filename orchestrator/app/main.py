@@ -12,7 +12,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from app.clients import QwenClient
 from app.contracts import GRAPH_VERSION
-from app.librechat import ChatCompletionRequest, LibreChatBridge
+from app.librechat import ChatCompletionRequest, ConversationModel, LibreChatBridge
 from app.models import ClassifyRequest, CreateRunRequest
 from app.settings import Settings
 from app.store import RunStore, utc_now
@@ -22,7 +22,18 @@ settings = Settings.from_environment()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 store = RunStore(settings.data_dir / "runs.sqlite3")
 workflow = LeadWorkflow(settings, store)
-librechat_bridge = LibreChatBridge(settings) if settings.librechat_ready else None
+librechat_bridge = (
+	LibreChatBridge(
+		settings,
+		conversation_model=ConversationModel(
+			settings,
+			deepseek=workflow.deepseek,
+			qwen=workflow.qwen,
+		),
+	)
+	if settings.librechat_ready
+	else None
+)
 queue: asyncio.Queue[str] = asyncio.Queue()
 workers: list[asyncio.Task] = []
 enqueued_runs: set[str] = set()

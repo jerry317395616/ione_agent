@@ -55,9 +55,11 @@ LibreChat application. The similarly named `librechat.ai` repository is the docu
 and is intentionally not used as the chat runtime.
 
 LibreChat connects to this service as an OpenAI-compatible custom endpoint at `/v1`. The bridge
-accepts streamed chat requests, keeps long tasks alive with SSE comments, and calls the existing
-Frappe `ione_agent.api` methods. This preserves Frappe sessions, run audits, lead tasks, candidate
-records and CRM writes instead of bypassing the business layer. Configure a distinct
+routes greetings, questions and planning conversations to DeepSeek with bounded conversation
+history. Requests that need internet search, tools or business-data changes continue through the
+existing Frappe `ione_agent.api` methods, while SSE comments keep long tasks alive. This preserves
+Frappe sessions, run audits, lead tasks, candidate records and CRM writes for executable work.
+Configure a distinct
 `IONE_LIBRECHAT_API_TOKEN` plus a dedicated Frappe integration user's API credentials; do not reuse
 browser passwords or commit credentials. Set `ione_agent_frontend_url` in the Frappe site config to
 the deployed LibreChat URL when the new frontend is ready.

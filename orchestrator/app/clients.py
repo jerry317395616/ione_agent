@@ -447,6 +447,7 @@ class DeepSeekClient:
 		response_format: dict[str, str] | None = None,
 		tools: list[dict[str, Any]] | None = None,
 		tool_choice: str | None = None,
+		conversation_messages: list[dict[str, str]] | None = None,
 		run_id: str | None = None,
 		purpose: str = "reasoning",
 	) -> dict[str, Any]:
@@ -457,14 +458,15 @@ class DeepSeekClient:
 		request_timeout = timeout or self.settings.deepseek_request_timeout_seconds
 		attempt_limit = max_attempts or self.settings.deepseek_max_attempts
 		attempt_limit = max(1, min(3, attempt_limit))
-		request_hash = _request_hash(system, user)
+		messages = [
+			{"role": "system", "content": system},
+			*(conversation_messages or [{"role": "user", "content": user}]),
+		]
+		request_hash = _request_hash(json.dumps(messages, ensure_ascii=False, sort_keys=True))
 		headers = {"Authorization": f"Bearer {self.settings.deepseek_token}"}
 		payload: dict[str, Any] = {
 			"model": model,
-			"messages": [
-				{"role": "system", "content": system},
-				{"role": "user", "content": user},
-			],
+			"messages": messages,
 			"stream": False,
 			"max_tokens": max_tokens,
 			"thinking": {"type": "enabled" if thinking else "disabled"},
@@ -555,6 +557,33 @@ class DeepSeekClient:
 			max_tokens=max_tokens,
 			thinking=thinking,
 			run_id=run_id,
+			purpose=purpose,
+		)
+		return str(message.get("content") or "")
+
+	def chat_messages(
+		self,
+		system: str,
+		messages: list[dict[str, str]],
+		*,
+		model: str | None = None,
+		timeout: int | None = None,
+		max_attempts: int | None = None,
+		max_tokens: int = 4000,
+		thinking: bool = False,
+		purpose: str = "conversation",
+	) -> str:
+		if not messages or messages[-1].get("role") != "user":
+			raise ValueError("Conversation must end with a user message")
+		message = self._completion(
+			system,
+			"",
+			model=model or self.settings.deepseek_fast_model,
+			timeout=timeout,
+			max_attempts=max_attempts,
+			max_tokens=max_tokens,
+			thinking=thinking,
+			conversation_messages=messages,
 			purpose=purpose,
 		)
 		return str(message.get("content") or "")

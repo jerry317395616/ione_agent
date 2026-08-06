@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -13,9 +14,29 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.clients import DeepSeekClient, QwenClient
 from app.settings import Settings
 
 TERMINAL_STATUSES = {"completed", "failed", "stopped", "cancelled"}
+SIMPLE_CHAT_PATTERN = re.compile(
+	r"^(?:你|您)?好(?:呀|啊|哇)?[!！。.]?|^(?:hi|hello|hey)[!！。.]?$|^在吗[?？]?$",
+	re.IGNORECASE,
+)
+LEAD_OBJECTS = ("线索", "招标", "投标", "采购公告", "商机", "获客")
+LEAD_ACTIONS = ("找", "搜", "搜索", "收集", "整理", "发现", "监测", "抓取")
+TASK_ACTIONS = ("创建", "新增", "修改", "删除", "填写", "写入", "导入", "发送", "执行", "运行")
+TASK_OBJECTS = ("客户", "供应商", "员工", "线索", "商机", "记录", "单据", "附件", "CRM", "ERPNext", "Frappe")
+INFORMATIONAL_PREFIXES = ("如何", "怎么", "怎样", "为什么", "什么是", "介绍", "说明", "请问如何", "请问怎么")
+ROUTING_SYSTEM_PROMPT = """你是 I-ONE Agent 的请求路由器。判断用户最后一条消息应该进入哪条路径。
+- chat：问候、知识问答、解释、建议、方案讨论、假设性问题，不需要真正调用外部工具或修改业务数据。
+- task：要求联网搜索，或要求创建、更新、删除、导入、发送、运行、写入 Frappe/CRM 等真实操作。
+只输出 JSON：{"route":"chat|task","confidence":0到1}。
+例："你好"是 chat；"怎么利用 CRM 线索"是 chat；"帮我找医疗行业招标并写入 CRM"是 task。"""
+GENERAL_CHAT_SYSTEM_PROMPT = """你是 I-ONE Agent，一名严谨、友好的企业智能助手。
+优先使用中文，直接回答用户的问题，并结合对话上下文保持连续性。
+当前路径只负责对话、解释和方案建议；不要声称已经搜索互联网、调用工具、创建记录或修改系统数据。
+如果用户明确要求执行真实业务操作，简要说明需要进入任务执行流程。"""
+CONVERSATION_UNAVAILABLE_MESSAGE = "AI 对话服务暂时不可用，请稍后重试。"
 
 
 class ChatMessage(BaseModel):
@@ -136,6 +157,121 @@ def message_text(message: ChatMessage) -> str:
 	return str(message.content or "").strip()
 
 
+def latest_user_text(request: ChatCompletionRequest) -> str:
+	return next(
+		(text for item in reversed(request.messages) if item.role == "user" and (text := message_text(item))),
+		"",
+	)
+
+
+def conversation_history(
+	request: ChatCompletionRequest,
+	*,
+	max_messages: int = 24,
+	max_characters: int = 24000,
+) -> list[dict[str, str]]:
+	selected: list[dict[str, str]] = []
+	remaining = max_characters
+	for item in reversed(request.messages):
+		if item.role not in {"user", "assistant"}:
+			continue
+		content = message_text(item)
+		if not content:
+			continue
+		content = content[:remaining]
+		if not content:
+			break
+		selected.append({"role": item.role, "content": content})
+		remaining -= len(content)
+		if len(selected) >= max_messages or remaining <= 0:
+			break
+	selected.reverse()
+	return selected
+
+
+def fallback_route(message: str) -> str:
+	normalized = message.strip()
+	if SIMPLE_CHAT_PATTERN.fullmatch(normalized):
+		return "chat"
+	if normalized.startswith(INFORMATIONAL_PREFIXES):
+		return "chat"
+	if any(word in normalized for word in LEAD_OBJECTS) and any(
+		word in normalized for word in LEAD_ACTIONS
+	):
+		return "task"
+	if any(word in normalized for word in TASK_ACTIONS) and any(
+		word.lower() in normalized.lower() for word in TASK_OBJECTS
+	):
+		return "task"
+	return "chat"
+
+
+class ConversationModel:
+	def __init__(
+		self,
+		settings: Settings,
+		*,
+		deepseek: DeepSeekClient | None = None,
+		qwen: QwenClient | None = None,
+	) -> None:
+		self.settings = settings
+		self.deepseek = deepseek or DeepSeekClient(settings)
+		self.qwen = qwen or QwenClient(settings)
+
+	def route(self, message: str) -> str:
+		local_route = fallback_route(message)
+		if SIMPLE_CHAT_PATTERN.fullmatch(message.strip()):
+			return "chat"
+		if local_route == "task":
+			return "task"
+		try:
+			result = self.deepseek.json(
+				ROUTING_SYSTEM_PROMPT,
+				json.dumps({"message": message}, ensure_ascii=False),
+				{"route": local_route, "confidence": 0},
+				model=self.settings.deepseek_fast_model,
+				timeout=20,
+				max_attempts=1,
+				max_tokens=300,
+				thinking=False,
+				purpose="librechat_route",
+			)
+		except Exception:
+			return local_route
+		route = result.get("route") if isinstance(result, dict) else local_route
+		return route if route in {"chat", "task"} else local_route
+
+	def answer(self, request: ChatCompletionRequest) -> str:
+		history = conversation_history(request)
+		if not history or history[-1]["role"] != "user":
+			raise ValueError("A non-empty user message is required")
+		try:
+			return self.deepseek.chat_messages(
+				GENERAL_CHAT_SYSTEM_PROMPT,
+				history,
+				model=self.settings.deepseek_fast_model,
+				timeout=90,
+				max_attempts=2,
+				max_tokens=4000,
+				thinking=False,
+				purpose="librechat_conversation",
+			)
+		except Exception:
+			transcript = "\n\n".join(
+				f"{item['role']}: {item['content']}" for item in history
+			)
+			try:
+				return self.qwen.chat(
+					GENERAL_CHAT_SYSTEM_PROMPT,
+					transcript,
+					timeout=90,
+					max_attempts=1,
+					purpose="librechat_conversation_fallback",
+				)
+			except Exception:
+				return CONVERSATION_UNAVAILABLE_MESSAGE
+
+
 def run_answer(run: dict[str, Any]) -> str:
 	status = str(run.get("status") or "").lower()
 	if status == "completed":
@@ -144,9 +280,15 @@ def run_answer(run: dict[str, Any]) -> str:
 
 
 class LibreChatBridge:
-	def __init__(self, settings: Settings) -> None:
+	def __init__(
+		self,
+		settings: Settings,
+		*,
+		conversation_model: ConversationModel | None = None,
+	) -> None:
 		self.settings = settings
 		self.frappe = FrappeAgentClient(settings)
+		self.conversation_model = conversation_model or ConversationModel(settings)
 		self.conversations = ConversationStore(settings.data_dir / "librechat.sqlite3")
 
 	async def close(self) -> None:
@@ -159,10 +301,7 @@ class LibreChatBridge:
 		user_id: str,
 		conversation_id: str,
 	) -> tuple[str, str]:
-		message = next(
-			(text for item in reversed(request.messages) if item.role == "user" and (text := message_text(item))),
-			"",
-		)
+		message = latest_user_text(request)
 		if not message:
 			raise ValueError("A non-empty user message is required")
 		session = self.conversations.get(user_id, conversation_id)
@@ -190,6 +329,13 @@ class LibreChatBridge:
 		user_id: str,
 		conversation_id: str,
 	) -> dict[str, Any]:
+		message = latest_user_text(request)
+		if not message:
+			raise ValueError("A non-empty user message is required")
+		route = await asyncio.to_thread(self.conversation_model.route, message)
+		if route == "chat":
+			answer = await asyncio.to_thread(self.conversation_model.answer, request)
+			return completion_response(request.model, answer)
 		run_id, _ = await self.start(
 			request,
 			user_id=user_id,
@@ -206,13 +352,37 @@ class LibreChatBridge:
 		user_id: str,
 		conversation_id: str,
 	) -> AsyncIterator[str]:
+		completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+		yield stream_chunk(completion_id, request.model, {"role": "assistant", "content": ""})
+		message = latest_user_text(request)
+		if not message:
+			raise ValueError("A non-empty user message is required")
+		route_task = asyncio.create_task(
+			asyncio.to_thread(self.conversation_model.route, message)
+		)
+		while not route_task.done():
+			await asyncio.wait({route_task}, timeout=5)
+			if not route_task.done():
+				yield ": I-ONE Agent is routing\n\n"
+		route = await route_task
+		if route == "chat":
+			answer_task = asyncio.create_task(
+				asyncio.to_thread(self.conversation_model.answer, request)
+			)
+			while not answer_task.done():
+				await asyncio.wait({answer_task}, timeout=5)
+				if not answer_task.done():
+					yield ": I-ONE Agent is thinking\n\n"
+			answer = await answer_task
+			yield stream_chunk(completion_id, request.model, {"content": answer})
+			yield stream_chunk(completion_id, request.model, {}, finish_reason="stop")
+			yield "data: [DONE]\n\n"
+			return
 		run_id, _ = await self.start(
 			request,
 			user_id=user_id,
 			conversation_id=conversation_id,
 		)
-		completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-		yield stream_chunk(completion_id, request.model, {"role": "assistant", "content": ""})
 		deadline = time.monotonic() + self.settings.librechat_run_timeout_seconds
 		try:
 			while True:
