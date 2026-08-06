@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+DEFAULT_INSTRUCTIONS = """You are I-ONE Agent, an enterprise AI assistant controlled by Codex App Server.
+Reply in Simplified Chinese by default unless the user requests another language.
+For greetings, casual conversation, explanations, and questions, answer directly without using tools.
+Use shell or file tools only when they are necessary to complete the user's explicit request.
+Do not inspect system configuration, credentials, home directories, or unrelated files.
+Work only inside the assigned workspace. Never claim that an action succeeded unless you verified it.
+Do not return generic phrases such as 'task completed' instead of answering the user's request.
+There is no business workflow router and no other agent. You are responsible for the complete response.
+"""
+
+
+def required(*names: str) -> str:
+	for name in names:
+		value = os.getenv(name, "").strip()
+		if value:
+			return value
+	raise RuntimeError(f"Required environment variable is missing: {' or '.join(names)}")
+
+
+def as_bool(name: str, default: bool) -> bool:
+	value = os.getenv(name)
+	if value is None:
+		return default
+	return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+@dataclass(frozen=True)
+class Settings:
+	bridge_token: str
+	deepseek_api_key: str
+	deepseek_api_base: str
+	model: str
+	model_provider: str
+	codex_bin: Path
+	codex_home: Path
+	data_dir: Path
+	workspace_root: Path
+	sandbox: str
+	network_access: bool
+	developer_instructions: str
+	request_timeout_seconds: int
+	keepalive_seconds: int
+
+	@classmethod
+	def from_environment(cls) -> Settings:
+		base = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip().rstrip("/")
+		if not base.endswith("/v1"):
+			base += "/v1"
+		sandbox = os.getenv("IONE_CODEX_SANDBOX", "workspace-write").strip()
+		if sandbox not in {"read-only", "workspace-write"}:
+			raise RuntimeError("IONE_CODEX_SANDBOX must be read-only or workspace-write")
+		return cls(
+			bridge_token=required("IONE_CODEX_BRIDGE_TOKEN", "IONE_LIBRECHAT_API_TOKEN"),
+			deepseek_api_key=required("DEEPSEEK_API_KEY"),
+			deepseek_api_base=base,
+			model=os.getenv("IONE_CODEX_MODEL", "deepseek-v4-flash").strip(),
+			model_provider=os.getenv("IONE_CODEX_MODEL_PROVIDER", "deepseek").strip(),
+			codex_bin=Path(required("IONE_CODEX_BIN")).expanduser().resolve(),
+			codex_home=Path(os.getenv("IONE_CODEX_HOME", "~/.local/share/ione-codex-agent/codex-home")).expanduser().resolve(),
+			data_dir=Path(os.getenv("IONE_CODEX_DATA_DIR", "~/.local/share/ione-codex-agent/data")).expanduser().resolve(),
+			workspace_root=Path(os.getenv("IONE_CODEX_WORKSPACE_ROOT", "~/.local/share/ione-codex-agent/workspaces")).expanduser().resolve(),
+			sandbox=sandbox,
+			network_access=as_bool("IONE_CODEX_NETWORK_ACCESS", True),
+			developer_instructions=os.getenv("IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS).strip(),
+			request_timeout_seconds=max(5, min(120, int(os.getenv("IONE_CODEX_RPC_TIMEOUT_SECONDS", "30")))),
+			keepalive_seconds=max(5, min(60, int(os.getenv("IONE_CODEX_KEEPALIVE_SECONDS", "10")))),
+		)
+
+	def prepare(self) -> None:
+		if not self.codex_bin.is_file():
+			raise RuntimeError(f"Codex executable not found: {self.codex_bin}")
+		for path in (self.codex_home, self.data_dir, self.workspace_root):
+			path.mkdir(parents=True, exist_ok=True)
+			path.chmod(0o700)
+		catalog_path = self.codex_home / "models.json"
+		catalog_path.write_text(
+			json.dumps(self.model_catalog(), ensure_ascii=False, indent=2),
+			encoding="utf-8",
+		)
+		catalog_path.chmod(0o600)
+		config = f'''model = "{self.model}"
+model_provider = "{self.model_provider}"
+model_catalog_json = "{catalog_path}"
+approval_policy = "never"
+sandbox_mode = "{self.sandbox}"
+web_search = "disabled"
+check_for_update_on_startup = false
+
+[sandbox_workspace_write]
+network_access = {str(self.network_access).lower()}
+writable_roots = ["{self.workspace_root}"]
+
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+
+[features]
+apps = false
+multi_agent = false
+remote_plugin = false
+memories = false
+
+[agents]
+enabled = false
+
+[model_providers.{self.model_provider}]
+name = "DeepSeek"
+base_url = "{self.deepseek_api_base}"
+env_key = "DEEPSEEK_API_KEY"
+wire_api = "responses"
+request_max_retries = 3
+stream_max_retries = 3
+stream_idle_timeout_ms = 300000
+'''
+		config_path = self.codex_home / "config.toml"
+		config_path.write_text(config, encoding="utf-8")
+		config_path.chmod(0o600)
+
+	def model_catalog(self) -> dict:
+		models = []
+		for priority, slug in enumerate(("deepseek-v4-flash", "deepseek-v4-pro"), start=1):
+			models.append(
+				{
+					"slug": slug,
+					"display_name": "DeepSeek V4 Pro" if slug.endswith("pro") else "DeepSeek V4 Flash",
+					"description": "DeepSeek V4 through its Responses API",
+					"default_reasoning_level": "high",
+					"supported_reasoning_levels": [
+						{"effort": "high", "description": "Standard reasoning"},
+						{"effort": "xhigh", "description": "Maximum reasoning"},
+					],
+					"shell_type": "unified_exec",
+					"visibility": "list",
+					"supported_in_api": True,
+					"priority": 100 - priority,
+					"availability_nux": None,
+					"upgrade": None,
+					"base_instructions": DEFAULT_INSTRUCTIONS,
+					"include_skills_usage_instructions": False,
+					"include_plugin_usage_instructions": False,
+					"include_apps_usage_instructions": False,
+					"supports_reasoning_summary_parameter": True,
+					"default_reasoning_summary": "auto",
+					"support_verbosity": False,
+					"default_verbosity": None,
+					"apply_patch_tool_type": "freeform",
+					"web_search_tool_type": "text",
+					"truncation_policy": {"mode": "bytes", "limit": 10000},
+					"supports_parallel_tool_calls": True,
+					"context_window": 1000000,
+					"max_context_window": 1000000,
+					"auto_compact_token_limit": 900000,
+					"effective_context_window_percent": 90,
+					"experimental_supported_tools": [],
+					"input_modalities": ["text"],
+					"supports_search_tool": False,
+					"use_responses_lite": False,
+				}
+			)
+		return {"models": models}
+
+	def process_environment(self) -> dict[str, str]:
+		environment = os.environ.copy()
+		environment.update(
+			{
+				"CODEX_HOME": str(self.codex_home),
+				"DEEPSEEK_API_KEY": self.deepseek_api_key,
+				"HOME": str(self.codex_home.parent),
+			}
+		)
+		return environment

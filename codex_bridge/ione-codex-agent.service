@@ -1,0 +1,33 @@
+[Unit]
+Description=I-ONE Agent powered by Codex App Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ioneagent
+Group=ioneagent
+WorkingDirectory=/opt/ione-codex-agent/current/codex_bridge
+Environment=HOME=/var/lib/ione-codex-agent
+EnvironmentFile=/etc/ione-codex-agent.env
+ExecStart=/opt/ione-codex-agent/venv/bin/uvicorn app.main:app --host 10.144.133.1 --port 8100 --workers 1
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ione-codex-agent
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+
