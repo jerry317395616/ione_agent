@@ -3,6 +3,7 @@ from pathlib import Path
 from app.contracts import AgentToolCall, LeadAgentState, RiskLevel, ToolSpec
 from app.model_router import ModelRouter
 from app.policy import ToolPolicy
+from app.settings import Settings
 from app.store import RunStore
 from app.tooling import GovernedToolNode, ToolRegistry
 from pydantic import BaseModel, ConfigDict
@@ -85,3 +86,51 @@ def test_model_router_normalizes_openai_style_tool_calls():
 	)
 	assert payload["tool_call"]["id"].startswith("call_")
 	assert payload["tool_call"]["arguments"] == {"maximum_results": 10}
+
+
+def test_model_router_prefers_deepseek_native_tool_calls(tmp_path: Path):
+	settings = Settings(
+		api_token="token",
+		data_dir=tmp_path,
+		qwen_base_url="http://qwen/v1",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		hermes_url="http://hermes",
+		hermes_api_key="key",
+		searxng_url="http://search",
+		deepseek_url="https://api.deepseek.test",
+		deepseek_token="key",
+		max_concurrent_runs=1,
+	)
+
+	class FakeDeepSeek:
+		def tool_decision(self, system, user, *, tools, **kwargs):
+			assert tools[0]["name"] == "search_public_tenders"
+			return {
+				"type": "tool_call",
+				"tool_call": {
+					"id": "call-deepseek",
+					"name": "search_public_tenders",
+					"arguments": {"maximum_results": 20},
+				},
+			}
+
+	class UnexpectedQwen:
+		def json(self, *args, **kwargs):
+			raise AssertionError("Qwen should only be used when DeepSeek fails")
+
+	router = ModelRouter(settings, FakeDeepSeek(), UnexpectedQwen())
+	decision = router.decide(
+		{"run_id": "run-1", "request": "找医疗线索"},
+		tools=[
+			{
+				"name": "search_public_tenders",
+				"description": "搜索公开招标",
+				"arguments": {"type": "object", "properties": {}},
+			}
+		],
+		eligible_tools=["search_public_tenders"],
+	)
+	assert decision.tool_call is not None
+	assert decision.tool_call.name == "search_public_tenders"
+	assert decision.tool_call.arguments == {"maximum_results": 20}

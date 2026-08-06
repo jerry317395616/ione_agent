@@ -95,7 +95,7 @@ class LeadWorkflow:
 		self.searxng = SearxngClient(settings)
 		self.extractor = WebPageExtractor(settings)
 		self.deepseek = DeepSeekClient(settings, audit=store.record_model_call)
-		self.router = ModelRouter(settings, self.qwen)
+		self.router = ModelRouter(settings, self.deepseek, self.qwen)
 		self.registry = self._build_registry()
 		self.tool_node = GovernedToolNode(self.registry, ToolPolicy(), store)
 
@@ -159,7 +159,7 @@ class LeadWorkflow:
 			ToolSpec(
 				name="review_qualified_leads",
 				version="1.0.0",
-				description="使用 DeepSeek 网页版复核高价值线索并生成售前跟进方案，失败时降级 Qwen。",
+				description="使用 DeepSeek API 复核高价值线索并生成售前跟进方案，失败时降级 Qwen。",
 				argument_model=ReviewCandidatesArguments,
 				max_attempts=1,
 			),
@@ -311,14 +311,18 @@ class LeadWorkflow:
 			"计划必须包含需求解析、公开信息检索、证据分析和完成步骤；需要售前方案时启用最终复核。\n"
 			+ json.dumps(planning_payload, ensure_ascii=False)
 		)
-		self.store.stage(run_id, "planning", 7, "DeepSeek 正在理解目标并制定执行计划", deepseek="正在规划")
+		self.store.stage(run_id, "planning", 7, "DeepSeek API 正在理解目标并制定执行计划", deepseek="正在规划")
 		planning_model = "deepseek"
 		planning_errors: list[str] = []
 		try:
 			raw_plan = self.deepseek.json(
+				"你是 I-ONE Agent 的首席规划模型。必须输出 json 对象，遵守给定结构和工具白名单。",
 				prompt,
 				{},
+				model=self.settings.deepseek_reasoning_model,
 				timeout=self.settings.deepseek_planning_timeout_seconds,
+				max_tokens=5000,
+				thinking=True,
 				run_id=run_id,
 				purpose="lead_initial_planning",
 			)
@@ -499,47 +503,77 @@ class LeadWorkflow:
 	) -> dict[str, Any]:
 		run_id = state["run_id"]
 		self.ensure_running(run_id)
-		self.store.stage(run_id, "parsing", 12, "Qwen 正在理解获客目标", qwen="正在解析")
+		self.store.stage(run_id, "parsing", 12, "DeepSeek API 正在理解获客目标", deepseek="正在解析")
 		profile = state.get("profile") or {}
 		partial = bool(state.get("partial"))
+		payload = json.dumps(
+			{
+				"today": date.today().isoformat(),
+				"request": arguments.request or state["request"],
+				"saved_profile": profile,
+				"deepseek_plan": state.get("search_strategy") or {},
+				"required_schema": {
+					"industry": "string",
+					"regions": ["string"],
+					"keywords": ["string"],
+					"excluded_keywords": ["string"],
+					"days_back": "integer",
+					"minimum_budget": "number",
+					"maximum_results": "integer",
+					"score_threshold": "number",
+				},
+			},
+			ensure_ascii=False,
+		)
+		parse_model = "deepseek"
 		try:
-			criteria = self.qwen.json(
-				"你是企业获客任务解析器。只输出一个 JSON 对象，不要解释。未知信息使用 null，不得编造。",
-				json.dumps(
-					{
-						"today": date.today().isoformat(),
-						"request": arguments.request or state["request"],
-						"saved_profile": profile,
-						"deepseek_plan": state.get("search_strategy") or {},
-						"required_schema": {
-							"industry": "string",
-							"regions": ["string"],
-							"keywords": ["string"],
-							"excluded_keywords": ["string"],
-							"days_back": "integer",
-							"minimum_budget": "number",
-							"maximum_results": "integer",
-							"score_threshold": "number",
-						},
-					},
-					ensure_ascii=False,
-				),
+			criteria = self.deepseek.json(
+				"你是企业获客任务解析器。必须只输出 json 对象。未知信息使用 null，不得编造。",
+				payload,
 				{},
+				model=self.settings.deepseek_fast_model,
 				timeout=90,
-				max_attempts=1,
+				max_attempts=2,
+				max_tokens=3000,
+				thinking=False,
 				run_id=run_id,
 				purpose="parse_lead_criteria",
 			)
+			if not isinstance(criteria, dict):
+				raise ValueError("DeepSeek 未返回条件对象")
 		except Exception as exc:
-			partial = True
-			criteria = {}
+			parse_model = "qwen"
 			self.store.stage(
 				run_id,
 				"parsing",
-				16,
-				f"Qwen 解析暂不可用，正在使用已验证的首次计划：{type(exc).__name__}",
-				qwen="解析已降级",
+				14,
+				f"DeepSeek 解析暂不可用，正在降级 Qwen：{type(exc).__name__}",
+				deepseek="解析失败，已降级",
+				qwen="正在接管解析",
 			)
+			try:
+				criteria = self.qwen.json(
+					"你是企业获客任务解析器。只输出一个 JSON 对象，不要解释。未知信息使用 null，不得编造。",
+					payload,
+					{},
+					timeout=90,
+					max_attempts=1,
+					run_id=run_id,
+					purpose="parse_lead_criteria_fallback",
+				)
+				if not isinstance(criteria, dict):
+					raise ValueError("Qwen 未返回条件对象")
+			except Exception as fallback_exc:
+				parse_model = "deterministic"
+				partial = True
+				criteria = {}
+				self.store.stage(
+					run_id,
+					"parsing",
+					16,
+					f"Qwen 解析暂不可用，使用已验证的首次计划：{type(fallback_exc).__name__}",
+					qwen="解析已降级",
+				)
 		criteria = {
 			**profile,
 			**dict(state.get("search_strategy") or {}),
@@ -547,6 +581,14 @@ class LeadWorkflow:
 		}
 		criteria["maximum_results"] = max(1, min(100, int(criteria.get("maximum_results") or 30)))
 		criteria["score_threshold"] = max(0, min(100, float(criteria.get("score_threshold") or 70)))
+		self.store.stage(
+			run_id,
+			"parsing",
+			18,
+			"获客目标解析完成",
+			deepseek="已完成" if parse_model == "deepseek" else "已降级",
+			qwen="已完成" if parse_model == "qwen" else "等待执行",
+		)
 		return {"criteria": criteria, "partial": partial}
 
 	def research(
@@ -632,7 +674,13 @@ class LeadWorkflow:
 		criteria = dict(state["criteria"])
 		if arguments.score_threshold is not None:
 			criteria["score_threshold"] = arguments.score_threshold
-		self.store.stage(run_id, "analyzing", 55, "Qwen 正在提取需求、评分并去重", qwen="正在分析")
+		self.store.stage(
+			run_id,
+			"analyzing",
+			55,
+			"DeepSeek API 正在提取需求、评分并去重",
+			deepseek="正在分析",
+		)
 		raw = state.get("raw_candidates") or []
 		if not raw:
 			return {"criteria": criteria, "candidates": []}
@@ -642,37 +690,69 @@ class LeadWorkflow:
 			for item in raw
 		]
 		partial = bool(state.get("partial"))
-		try:
-			analyzed = self.qwen.json(
-				"你是严谨的招标线索分析师。只使用输入证据，禁止补造。只输出 JSON 数组。",
-				json.dumps(
-					{
-						"criteria": criteria,
-						"candidates": compact,
-						"instructions": (
-							"保留输入字段，并新增 relevance_score(0-100)、confidence(0-100)、risk_level(低/中/高)、"
-							"requirement_summary、qualification_requirements、recommendation。来源网址为空的记录必须删除；"
-							"明显过期、重复或与行业无关的记录删除。日期统一 ISO 8601，预算统一为人民币数值。"
-						),
-					},
-					ensure_ascii=False,
+		analysis_payload = json.dumps(
+			{
+				"criteria": criteria,
+				"candidates": compact,
+				"instructions": (
+					"保留输入字段，并新增 relevance_score(0-100)、confidence(0-100)、risk_level(低/中/高)、"
+					"requirement_summary、qualification_requirements、recommendation。来源网址为空的记录必须删除；"
+					"明显过期、重复或与行业无关的记录删除。日期统一 ISO 8601，预算统一为人民币数值。"
 				),
-				[],
+				"required_output": {"candidates": ["结构化候选线索"]},
+			},
+			ensure_ascii=False,
+		)
+		analysis_model = "deepseek"
+		try:
+			response = self.deepseek.json(
+				"你是严谨的招标线索分析师。只能使用输入证据，禁止补造。必须输出 json 对象。",
+				analysis_payload,
+				{},
+				model=self.settings.deepseek_fast_model,
 				timeout=180,
-				max_attempts=1,
+				max_attempts=2,
+				max_tokens=16000,
+				thinking=False,
 				run_id=run_id,
 				purpose="analyze_lead_candidates",
 			)
+			analyzed = response.get("candidates") if isinstance(response, dict) else None
+			if not isinstance(analyzed, list):
+				raise ValueError("DeepSeek 未返回候选线索数组")
 		except Exception as exc:
-			partial = True
+			analysis_model = "qwen"
 			self.store.stage(
 				run_id,
 				"analyzing",
-				62,
-				f"Qwen 暂不可用，正在依据已核验证据保守评分：{type(exc).__name__}",
-				qwen="已降级",
+				60,
+				f"DeepSeek 分析暂不可用，正在降级 Qwen：{type(exc).__name__}",
+				deepseek="分析失败，已降级",
+				qwen="正在接管分析",
 			)
-			analyzed = self._fallback_analysis(raw, criteria)
+			try:
+				analyzed = self.qwen.json(
+					"你是严谨的招标线索分析师。只使用输入证据，禁止补造。只输出 JSON 数组。",
+					analysis_payload,
+					[],
+					timeout=180,
+					max_attempts=1,
+					run_id=run_id,
+					purpose="analyze_lead_candidates_fallback",
+				)
+				if not isinstance(analyzed, list):
+					raise ValueError("Qwen 未返回候选线索数组")
+			except Exception as fallback_exc:
+				analysis_model = "deterministic"
+				partial = True
+				self.store.stage(
+					run_id,
+					"analyzing",
+					62,
+					f"Qwen 暂不可用，依据已核验证据保守评分：{type(fallback_exc).__name__}",
+					qwen="已降级",
+				)
+				analyzed = self._fallback_analysis(raw, criteria)
 		if not isinstance(analyzed, list) or (not analyzed and raw):
 			partial = True
 			analyzed = self._fallback_analysis(raw, criteria)
@@ -694,7 +774,14 @@ class LeadWorkflow:
 			seen.add(fingerprint)
 			item["fingerprint"] = fingerprint
 			candidates.append(item)
-		self.store.stage(run_id, "analyzing", 70, f"已形成 {len(candidates)} 条可追溯候选线索", qwen="已完成")
+		self.store.stage(
+			run_id,
+			"analyzing",
+			70,
+			f"已形成 {len(candidates)} 条可追溯候选线索",
+			deepseek="已完成" if analysis_model == "deepseek" else "已降级",
+			qwen="已完成" if analysis_model == "qwen" else "等待执行",
+		)
 		return {"criteria": criteria, "candidates": candidates, "partial": partial}
 
 	@staticmethod
@@ -745,16 +832,24 @@ class LeadWorkflow:
 		qualified = [item for item in candidates if float(item.get("relevance_score") or 0) >= threshold]
 		if not qualified:
 			return {"candidates": candidates}
-		self.store.stage(run_id, "reviewing", 78, "DeepSeek 正在复核高价值线索并制定跟进方案", deepseek="正在复核")
+		self.store.stage(
+			run_id,
+			"reviewing",
+			78,
+			"DeepSeek API 正在复核高价值线索并制定跟进方案",
+			deepseek="正在复核",
+		)
 		prompt = (
 			"你是企业招投标顾问。依据下面的已核验公开线索，为每条线索给出可执行的售前跟进方案。"
 			"不要杜撰关系、资质或未公开信息。只返回 JSON 数组，每项包含 fingerprint 和 deepseek_plan。\n"
 			+ json.dumps(qualified[: arguments.maximum_candidates], ensure_ascii=False)
 		)
 		partial = bool(state.get("partial"))
+		review_model = "deepseek"
 		try:
 			plans = self.deepseek.review(prompt, run_id=run_id)
 		except Exception as exc:
+			review_model = "qwen"
 			partial = True
 			self.store.stage(
 				run_id,
@@ -775,6 +870,7 @@ class LeadWorkflow:
 					purpose="lead_review_fallback",
 				)
 			except Exception as fallback_exc:
+				review_model = "deterministic"
 				plans = []
 				self.store.stage(
 					run_id,
@@ -814,7 +910,8 @@ class LeadWorkflow:
 			"reviewing",
 			88,
 			f"方案复核完成，{matched}/{len(qualified)} 条已生成方案",
-			deepseek="已完成" if matched == len(qualified) else "部分完成",
+			deepseek="已完成" if review_model == "deepseek" else "已降级",
+			qwen="已完成" if review_model == "qwen" else "等待执行",
 		)
 		return {"candidates": candidates, "partial": partial}
 

@@ -29,8 +29,11 @@ class Settings:
 	max_agent_iterations: int = 12
 	agent_run_budget_seconds: int = 1800
 	hermes_request_timeout_seconds: int = 240
-	deepseek_planning_timeout_seconds: int = 90
-	deepseek_job_timeout_seconds: int = 180
+	deepseek_reasoning_model: str = "deepseek-v4-pro"
+	deepseek_fast_model: str = "deepseek-v4-flash"
+	deepseek_planning_timeout_seconds: int = 120
+	deepseek_request_timeout_seconds: int = 180
+	deepseek_max_attempts: int = 2
 	deepseek_breaker_failures: int = 3
 	deepseek_breaker_cooldown_seconds: int = 300
 	checkpoint_database_url: str = ""
@@ -55,8 +58,14 @@ class Settings:
 			hermes_url=os.getenv("HERMES_API_URL", "http://127.0.0.1:8642").strip().rstrip("/"),
 			hermes_api_key=os.getenv("HERMES_API_KEY", "").strip(),
 			searxng_url=os.getenv("SEARXNG_URL", "http://127.0.0.1:8088").strip().rstrip("/"),
-			deepseek_url=os.getenv("DEEPSEEK_REVIEW_URL", "http://127.0.0.1:9474").strip().rstrip("/"),
-			deepseek_token=os.getenv("DEEPSEEK_REVIEW_TOKEN", "").strip(),
+			deepseek_url=(
+				os.getenv("DEEPSEEK_API_BASE")
+				or os.getenv("DEEPSEEK_REVIEW_URL")
+				or "https://api.deepseek.com"
+			).strip().rstrip("/"),
+			deepseek_token=(
+				os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_REVIEW_TOKEN") or ""
+			).strip(),
 			max_concurrent_runs=max(1, min(8, int(os.getenv("IONE_MAX_CONCURRENT_RUNS", "2")))),
 			search_http_proxy=os.getenv("SEARCH_HTTP_PROXY", "").strip(),
 			max_agent_iterations=max(6, min(30, int(os.getenv("IONE_AGENT_MAX_ITERATIONS", "12")))),
@@ -66,11 +75,20 @@ class Settings:
 			hermes_request_timeout_seconds=max(
 				60, min(600, int(os.getenv("HERMES_REQUEST_TIMEOUT_SECONDS", "240")))
 			),
+			deepseek_reasoning_model=os.getenv(
+				"DEEPSEEK_REASONING_MODEL", "deepseek-v4-pro"
+			).strip(),
+			deepseek_fast_model=os.getenv(
+				"DEEPSEEK_FAST_MODEL", "deepseek-v4-flash"
+			).strip(),
 			deepseek_planning_timeout_seconds=max(
-				30, min(120, int(os.getenv("DEEPSEEK_PLANNING_TIMEOUT_SECONDS", "90")))
+				30, min(300, int(os.getenv("DEEPSEEK_PLANNING_TIMEOUT_SECONDS", "120")))
 			),
-			deepseek_job_timeout_seconds=max(
-				60, min(1800, int(os.getenv("DEEPSEEK_JOB_TIMEOUT_SECONDS", "180")))
+			deepseek_request_timeout_seconds=max(
+				30, min(600, int(os.getenv("DEEPSEEK_REQUEST_TIMEOUT_SECONDS", "180")))
+			),
+			deepseek_max_attempts=max(
+				1, min(3, int(os.getenv("DEEPSEEK_MAX_ATTEMPTS", "2")))
 			),
 			deepseek_breaker_failures=max(
 				1, min(10, int(os.getenv("DEEPSEEK_BREAKER_FAILURES", "3")))
@@ -106,3 +124,12 @@ class Settings:
 	def qwen_chat_url(self) -> str:
 		base = self.qwen_base_url.removesuffix("/chat/completions").rstrip("/")
 		return f"{base}/chat/completions"
+
+	@property
+	def deepseek_chat_url(self) -> str:
+		base = self.deepseek_url.removesuffix("/chat/completions").rstrip("/")
+		return f"{base}/chat/completions"
+
+	@property
+	def deepseek_ready(self) -> bool:
+		return bool(self.deepseek_token and self.deepseek_url)

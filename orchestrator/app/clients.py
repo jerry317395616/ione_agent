@@ -346,6 +346,10 @@ class CircuitOpenError(RuntimeError):
 	pass
 
 
+class EmptyModelResponseError(RuntimeError):
+	pass
+
+
 class DeepSeekClient:
 	def __init__(self, settings: Settings, audit: AuditCallback | None = None) -> None:
 		self.settings = settings
@@ -353,24 +357,6 @@ class DeepSeekClient:
 		self._lock = threading.Lock()
 		self._consecutive_failures = 0
 		self._opened_until = 0.0
-
-	@staticmethod
-	def _extract(payload: Any) -> str:
-		if isinstance(payload, str):
-			return payload
-		if isinstance(payload, dict):
-			for key in ("answer", "result", "output", "content", "text", "message", "reply"):
-				if key in payload:
-					value = DeepSeekClient._extract(payload[key])
-					if value:
-						return value
-		return ""
-
-	@staticmethod
-	def _job_payload(payload: Any) -> dict[str, Any]:
-		if isinstance(payload, dict) and isinstance(payload.get("job"), dict):
-			return payload["job"]
-		return payload if isinstance(payload, dict) else {}
 
 	@staticmethod
 	def _plan_text(value: Any) -> str:
@@ -407,15 +393,14 @@ class DeepSeekClient:
 		content = (content or "").strip()
 		return [{"deepseek_plan": content}] if content else []
 
-	@staticmethod
-	def _conversation_key() -> str:
-		return f"ione-agent-lead-{uuid4().hex[:16]}"
-
 	def health(self) -> dict[str, Any]:
 		with self._lock:
 			remaining = max(0, int(self._opened_until - time.monotonic()))
 			return {
 				"state": "open" if remaining else "closed",
+				"provider": "deepseek_api",
+				"reasoning_model": self.settings.deepseek_reasoning_model,
+				"fast_model": self.settings.deepseek_fast_model,
 				"consecutive_failures": self._consecutive_failures,
 				"retry_after_seconds": remaining,
 			}
@@ -423,7 +408,7 @@ class DeepSeekClient:
 	def _before_call(self) -> None:
 		with self._lock:
 			if self._opened_until > time.monotonic():
-				raise CircuitOpenError("DeepSeek 网页服务熔断中，请稍后重试。")
+				raise CircuitOpenError("DeepSeek API 熔断中，请稍后重试。")
 			if self._opened_until:
 				self._opened_until = 0
 				self._consecutive_failures = 0
@@ -439,92 +424,235 @@ class DeepSeekClient:
 			if self._consecutive_failures >= self.settings.deepseek_breaker_failures:
 				self._opened_until = time.monotonic() + self.settings.deepseek_breaker_cooldown_seconds
 
+	@staticmethod
+	def _retryable(exc: Exception) -> bool:
+		if isinstance(exc, EmptyModelResponseError):
+			return True
+		if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
+			return True
+		if isinstance(exc, httpx.HTTPStatusError):
+			return exc.response.status_code in {408, 409, 425, 429} or exc.response.status_code >= 500
+		return False
+
+	def _completion(
+		self,
+		system: str,
+		user: str,
+		*,
+		model: str,
+		timeout: int | None = None,
+		max_attempts: int | None = None,
+		max_tokens: int = 8000,
+		thinking: bool = False,
+		response_format: dict[str, str] | None = None,
+		tools: list[dict[str, Any]] | None = None,
+		tool_choice: str | None = None,
+		run_id: str | None = None,
+		purpose: str = "reasoning",
+	) -> dict[str, Any]:
+		if not self.settings.deepseek_token:
+			raise RuntimeError("DeepSeek API key is not configured")
+		self._before_call()
+		started = time.monotonic()
+		request_timeout = timeout or self.settings.deepseek_request_timeout_seconds
+		attempt_limit = max_attempts or self.settings.deepseek_max_attempts
+		attempt_limit = max(1, min(3, attempt_limit))
+		request_hash = _request_hash(system, user)
+		headers = {"Authorization": f"Bearer {self.settings.deepseek_token}"}
+		payload: dict[str, Any] = {
+			"model": model,
+			"messages": [
+				{"role": "system", "content": system},
+				{"role": "user", "content": user},
+			],
+			"stream": False,
+			"max_tokens": max_tokens,
+			"thinking": {"type": "enabled" if thinking else "disabled"},
+		}
+		if thinking:
+			payload["reasoning_effort"] = "high"
+		else:
+			payload["temperature"] = 0.1
+		if response_format:
+			payload["response_format"] = response_format
+		if tools:
+			payload["tools"] = tools
+			payload["tool_choice"] = tool_choice or "auto"
+		if run_id:
+			payload["user_id"] = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:32]
+
+		last_error: Exception | None = None
+		for attempt in range(attempt_limit):
+			try:
+				with httpx.Client(
+					timeout=httpx.Timeout(request_timeout, connect=min(20, request_timeout))
+				) as client:
+					response = client.post(
+						self.settings.deepseek_chat_url,
+						headers=headers,
+						json=payload,
+					)
+					response.raise_for_status()
+					body = response.json()
+					choice = body["choices"][0]
+					message = choice["message"]
+					if not str(message.get("content") or "").strip() and not message.get("tool_calls"):
+						raise EmptyModelResponseError("DeepSeek API returned an empty response")
+				self._record_success()
+				if self.audit:
+					self.audit(
+						run_id=run_id,
+						provider="deepseek_api",
+						model=str(body.get("model") or model),
+						purpose=purpose,
+						status="completed",
+						request_hash=request_hash,
+						response_preview=str(message.get("content") or message.get("tool_calls") or ""),
+						elapsed_ms=int((time.monotonic() - started) * 1000),
+					)
+				return message
+			except Exception as exc:
+				last_error = exc
+				if attempt + 1 < attempt_limit and self._retryable(exc):
+					time.sleep(min(4, 2**attempt))
+					continue
+				break
+
+		self._record_failure()
+		assert last_error is not None
+		if self.audit:
+			self.audit(
+				run_id=run_id,
+				provider="deepseek_api",
+				model=model,
+				purpose=purpose,
+				status="failed",
+				request_hash=request_hash,
+				error=f"{type(last_error).__name__}: {last_error}",
+				elapsed_ms=int((time.monotonic() - started) * 1000),
+			)
+		raise last_error
+
 	def chat(
 		self,
-		prompt: str,
+		system: str,
+		user: str,
 		*,
+		model: str | None = None,
 		timeout: int | None = None,
+		max_attempts: int | None = None,
+		max_tokens: int = 8000,
+		thinking: bool = False,
 		run_id: str | None = None,
 		purpose: str = "reasoning",
 	) -> str:
-		if not self.settings.deepseek_token:
-			raise RuntimeError("DeepSeek review token is not configured")
-		self._before_call()
-		started = time.monotonic()
-		job_timeout = timeout or self.settings.deepseek_job_timeout_seconds
-		request_hash = _request_hash(prompt)
-		headers = {"Authorization": f"Bearer {self.settings.deepseek_token}"}
-		try:
-			with httpx.Client(timeout=min(60, max(15, job_timeout))) as client:
-				response = client.post(
-					f"{self.settings.deepseek_url}/jobs",
-					headers=headers,
-					json={"prompt": prompt, "conversationKey": self._conversation_key()},
-				)
-				response.raise_for_status()
-				job = self._job_payload(response.json())
-				job_id = job.get("id") or job.get("jobId") or job.get("job_id")
-				if not job_id:
-					content = self._extract(job)
-				else:
-					deadline = time.monotonic() + job_timeout
-					content = ""
-					while time.monotonic() < deadline:
-						status = client.get(f"{self.settings.deepseek_url}/jobs/{job_id}", headers=headers)
-						status.raise_for_status()
-						payload = self._job_payload(status.json())
-						state = str(payload.get("status") or "").lower()
-						if state in {"failed", "error", "cancelled"}:
-							raise RuntimeError(self._extract(payload) or f"DeepSeek job {state}")
-						if state in {"completed", "complete", "done", "succeeded", "success"}:
-							content = self._extract(payload)
-							break
-						time.sleep(3)
-					if not content:
-						raise TimeoutError(f"DeepSeek job did not finish within {job_timeout} seconds")
-			if not content.strip():
-				raise RuntimeError("DeepSeek returned an empty response")
-			self._record_success()
-			if self.audit:
-				self.audit(
-					run_id=run_id,
-					provider="deepseek_web",
-					model="deepseek-web",
-					purpose=purpose,
-					status="completed",
-					request_hash=request_hash,
-					response_preview=content,
-					elapsed_ms=int((time.monotonic() - started) * 1000),
-				)
-			return content
-		except Exception as exc:
-			self._record_failure()
-			if self.audit:
-				self.audit(
-					run_id=run_id,
-					provider="deepseek_web",
-					model="deepseek-web",
-					purpose=purpose,
-					status="failed",
-					request_hash=request_hash,
-					error=f"{type(exc).__name__}: {exc}",
-					elapsed_ms=int((time.monotonic() - started) * 1000),
-				)
-			raise
+		message = self._completion(
+			system,
+			user,
+			model=model or self.settings.deepseek_reasoning_model,
+			timeout=timeout,
+			max_attempts=max_attempts,
+			max_tokens=max_tokens,
+			thinking=thinking,
+			run_id=run_id,
+			purpose=purpose,
+		)
+		return str(message.get("content") or "")
 
 	def json(
 		self,
-		prompt: str,
+		system: str,
+		user: str,
 		default: Any,
 		*,
+		model: str | None = None,
 		timeout: int | None = None,
+		max_attempts: int | None = None,
+		max_tokens: int = 8000,
+		thinking: bool = False,
 		run_id: str | None = None,
 		purpose: str = "structured_reasoning",
 	) -> Any:
 		return parse_json(
-			self.chat(prompt, timeout=timeout, run_id=run_id, purpose=purpose),
+			str(
+				self._completion(
+					system,
+					user,
+					model=model or self.settings.deepseek_reasoning_model,
+					timeout=timeout,
+					max_attempts=max_attempts,
+					max_tokens=max_tokens,
+					thinking=thinking,
+					response_format={"type": "json_object"},
+					run_id=run_id,
+					purpose=purpose,
+				).get("content")
+				or ""
+			),
 			default,
 		)
 
+	def tool_decision(
+		self,
+		system: str,
+		user: str,
+		*,
+		tools: list[dict[str, Any]],
+		timeout: int = 60,
+		run_id: str | None = None,
+		purpose: str = "agent_control",
+	) -> dict[str, Any]:
+		openai_tools = [
+			{
+				"type": "function",
+				"function": {
+					"name": item["name"],
+					"description": item["description"],
+					"parameters": item.get("arguments") or {"type": "object", "properties": {}},
+				},
+			}
+			for item in tools
+		]
+		message = self._completion(
+			system,
+			user,
+			model=self.settings.deepseek_fast_model,
+			timeout=timeout,
+			max_tokens=2000,
+			thinking=False,
+			tools=openai_tools or None,
+			tool_choice="required" if openai_tools else None,
+			run_id=run_id,
+			purpose=purpose,
+		)
+		calls = message.get("tool_calls") or []
+		if calls:
+			call = calls[0]
+			function = call.get("function") or {}
+			return {
+				"type": "tool_call",
+				"tool_call": {
+					"id": call.get("id") or f"call_{uuid4().hex[:16]}",
+					"name": function.get("name"),
+					"arguments": parse_json(str(function.get("arguments") or "{}"), {}),
+				},
+				"reason": str(message.get("content") or "DeepSeek 已选择下一项工具。"),
+			}
+		return {
+			"type": "answer",
+			"content": str(message.get("content") or "任务已完成。"),
+			"reason": "",
+		}
+
 	def review(self, prompt: str, *, run_id: str | None = None) -> list[dict[str, Any]]:
-		return self._parse_review_content(self.chat(prompt, run_id=run_id, purpose="lead_review"))
+		content = self.chat(
+			"你是企业招投标顾问。只依据已核验的公开证据形成方案，不得编造。",
+			prompt,
+			model=self.settings.deepseek_reasoning_model,
+			timeout=self.settings.deepseek_request_timeout_seconds,
+			max_tokens=12000,
+			thinking=True,
+			run_id=run_id,
+			purpose="lead_review",
+		)
+		return self._parse_review_content(content)

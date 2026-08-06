@@ -6,16 +6,17 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from app.clients import QwenClient
+from app.clients import DeepSeekClient, QwenClient
 from app.contracts import AgentDecision, AgentToolCall, LeadAgentState
 from app.settings import Settings
 
 
 class ModelRouter:
-	"""Use Qwen as the stable execution controller after the planning node."""
+	"""Use DeepSeek tool calls for control and Qwen only as a fallback."""
 
-	def __init__(self, settings: Settings, qwen: QwenClient) -> None:
+	def __init__(self, settings: Settings, deepseek: DeepSeekClient, qwen: QwenClient) -> None:
 		self.settings = settings
+		self.deepseek = deepseek
 		self.qwen = qwen
 
 	@staticmethod
@@ -67,15 +68,16 @@ class ModelRouter:
 		tools: list[dict[str, Any]],
 		eligible_tools: list[str],
 	) -> AgentDecision:
+		if not eligible_tools:
+			return AgentDecision(
+				type="answer",
+				content=state.get("summary") or "任务已完成。",
+				reason="所有计划步骤已经完成。",
+			)
 		instructions = (
-			"你是 I-ONE Agent 的生产级执行控制模型。DeepSeek 已经完成首次规划，"
-			"你只负责根据当前状态决定下一步，不执行工具。"
-			"每次只允许调用一个白名单工具。只输出 JSON，不要 Markdown。"
-			"调用工具时输出 {\"type\":\"tool_call\",\"tool_call\":{\"id\":\"call_x\","
-			"\"name\":\"工具名\",\"arguments\":{}} ,\"reason\":\"简短原因\"}。"
-			"任务完成时输出 {\"type\":\"answer\",\"content\":\"最终回答\",\"reason\":\"\"}。"
-			"只能从 eligible_tools 中选择工具，不得输出未注册工具，不得生成代码、Shell、SQL 或网址调用。"
-			"eligible_tools 非空时不得提前回答；为空时返回最终回答。"
+			"你是 I-ONE Agent 的生产级执行控制模型。根据已验证计划和当前状态选择下一项工具。"
+			"必须调用且每次只调用一个提供的白名单工具，不得直接执行工具，不得生成代码、Shell、SQL，"
+			"不得调用未提供的工具，也不得修改计划顺序或跳过依赖。"
 		)
 		payload = {
 			"state": self._context(state),
@@ -85,17 +87,30 @@ class ModelRouter:
 		user = json.dumps(payload, ensure_ascii=False)
 		raw: Any = {}
 		try:
-			raw = self.qwen.json(
+			raw = self.deepseek.tool_decision(
 				instructions,
 				user,
-				{},
+				tools=tools,
 				timeout=60,
-				max_attempts=1,
 				run_id=state.get("run_id"),
 				purpose="agent_control",
 			)
+			return AgentDecision.model_validate(self._normalize(raw))
 		except Exception:
-			raw = {}
+			try:
+				raw = self.qwen.json(
+					"你是执行控制降级模型。只能从 eligible_tools 选择一项，且只输出 JSON。"
+					"格式为 {\"type\":\"tool_call\",\"tool_call\":{\"name\":\"工具名\","
+					"\"arguments\":{}},\"reason\":\"简短原因\"}。",
+					user,
+					{},
+					timeout=60,
+					max_attempts=1,
+					run_id=state.get("run_id"),
+					purpose="agent_control_fallback",
+				)
+			except Exception:
+				raw = {}
 		try:
 			return AgentDecision.model_validate(self._normalize(raw))
 		except ValidationError:

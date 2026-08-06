@@ -20,25 +20,67 @@ def test_parse_json_accepts_fenced_payload():
 	).graph_version == GRAPH_VERSION
 
 
-def test_deepseek_extract_accepts_web_relay_reply():
-	assert DeepSeekClient._extract({"status": "completed", "reply": "[{\"fingerprint\": \"abc\"}]"}) == '[{"fingerprint": "abc"}]'
-	assert DeepSeekClient._job_payload({"ok": True, "job": {"id": "job-1", "status": "queued"}}) == {
-		"id": "job-1",
-		"status": "queued",
-	}
-
-
 def test_deepseek_keeps_markdown_review_as_fallback_plan():
 	plans = DeepSeekClient._parse_review_content("## 跟进方案\n1. 核验公告与资质")
 	assert plans == [{"deepseek_plan": "## 跟进方案\n1. 核验公告与资质"}]
-	first = DeepSeekClient._conversation_key()
-	second = DeepSeekClient._conversation_key()
-	assert first.startswith("ione-agent-lead-")
-	assert first != second
 	parsed = DeepSeekClient._parse_review_content(
 		'[{"fingerprint":"abc","deepseek_plan":["核验公告", "准备资质"]}]'
 	)
 	assert parsed[0]["deepseek_plan"] == "- 核验公告\n- 准备资质"
+
+
+def test_deepseek_retries_an_empty_api_response(tmp_path: Path, monkeypatch):
+	settings = Settings(
+		api_token="token",
+		data_dir=tmp_path,
+		qwen_base_url="http://qwen/v1",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		hermes_url="http://hermes",
+		hermes_api_key="key",
+		searxng_url="http://search",
+		deepseek_url="https://api.deepseek.test",
+		deepseek_token="key",
+		max_concurrent_runs=1,
+	)
+	responses = ["", "可用结果"]
+
+	class FakeResponse:
+		def __init__(self, content):
+			self.content = content
+
+		def raise_for_status(self):
+			return None
+
+		def json(self):
+			return {
+				"model": "deepseek-v4-flash",
+				"choices": [{"message": {"content": self.content, "tool_calls": None}}],
+			}
+
+	class FakeClient:
+		def __init__(self, **kwargs):
+			pass
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *args):
+			return None
+
+		def post(self, *args, **kwargs):
+			return FakeResponse(responses.pop(0))
+
+	monkeypatch.setattr("app.clients.httpx.Client", FakeClient)
+	monkeypatch.setattr("app.clients.time.sleep", lambda _seconds: None)
+	content = DeepSeekClient(settings).chat(
+		"系统提示",
+		"用户请求",
+		model=settings.deepseek_fast_model,
+		max_attempts=2,
+	)
+	assert content == "可用结果"
+	assert responses == []
 
 
 def test_search_queries_are_short_and_drop_all_region_and_slashes():
@@ -191,9 +233,10 @@ def test_initial_planning_prefers_deepseek_and_persists_a_valid_plan(tmp_path: P
 	workflow = LeadWorkflow(settings, store)
 
 	class PlanningDeepSeek:
-		def json(self, prompt, default, **kwargs):
+		def json(self, system, user, default, **kwargs):
 			assert kwargs["purpose"] == "lead_initial_planning"
-			assert kwargs["timeout"] == 90
+			assert kwargs["timeout"] == 120
+			assert kwargs["thinking"] is True
 			return {
 				"intent": "lead_discovery",
 				"goal": "发现近期医疗招标机会",
@@ -246,7 +289,7 @@ def test_initial_planning_falls_back_to_qwen_without_failing_the_run(tmp_path: P
 	workflow = LeadWorkflow(settings, store)
 
 	class FailingDeepSeek:
-		def json(self, prompt, default, **kwargs):
+		def json(self, system, user, default, **kwargs):
 			raise TimeoutError("planner timeout")
 
 	class PlanningQwen:
@@ -351,7 +394,22 @@ def test_workflow_produces_traceable_candidate(tmp_path: Path):
 			return results
 
 	class FakeDeepSeek:
-		def json(self, prompt, default, **kwargs):
+		def json(self, system, user, default, **kwargs):
+			if kwargs.get("purpose") == "parse_lead_criteria":
+				return {"industry": "医疗", "maximum_results": 10, "score_threshold": 70}
+			if kwargs.get("purpose") == "analyze_lead_candidates":
+				return {
+					"candidates": [
+						{
+							"title": "医院信息化建设项目",
+							"source_url": "https://example.test/tender/1",
+							"purchaser": "示例医院",
+							"relevance_score": 92,
+							"confidence": 90,
+							"risk_level": "低",
+						}
+					]
+				}
 			return {
 				"intent": "lead_discovery",
 				"goal": "发现医疗行业线索",

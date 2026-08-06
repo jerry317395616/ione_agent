@@ -64,10 +64,11 @@ the deployed LibreChat URL when the new frontend is ready.
 
 ## Production agent controls
 
-- Every new lead task first enters a dedicated DeepSeek planning node. The validated goal, search strategy, tool plan and completion criteria are persisted in LangGraph State.
-- DeepSeek planning is bounded by `DEEPSEEK_PLANNING_TIMEOUT_SECONDS` and falls back once to Qwen, then to a deterministic safe plan if both models are unavailable.
-- Qwen is always the execution controller. It may only choose tools allowed by the validated plan whose dependencies are satisfied.
-- DeepSeek remains the final specialist reviewer for qualified leads and uses an isolated browser conversation for every call.
+- DeepSeek API is the primary LLM for planning, intent parsing, tool selection, evidence analysis and final lead review. The validated state is persisted by LangGraph rather than entrusted to the model.
+- `deepseek-v4-pro` handles planning and final review. `deepseek-v4-flash` handles frequent structured parsing, analysis and native tool selection.
+- DeepSeek calls are bounded by per-node timeouts, retry only transient failures and open a circuit breaker after repeated failures.
+- Qwen is the automatic model fallback. A deterministic evidence-only path still completes safely when both providers are unavailable.
+- The control node uses DeepSeek native Tool Calls, then validates the selected tool against the plan, dependency graph, Pydantic arguments and policy allowlist before execution.
 - Hermes only receives the requested candidate set with bounded source text. `HERMES_REQUEST_TIMEOUT_SECONDS` defaults to 240 seconds; a timeout preserves collected evidence and lets Qwen continue the run.
 - Every tool is versioned, allowlisted, validated and assigned a risk level before execution.
 - Tool side effects use a deterministic idempotency key and are recorded in the orchestrator audit database.

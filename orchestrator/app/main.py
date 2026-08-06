@@ -151,12 +151,14 @@ def health() -> dict:
 		"runtime": "LangGraph",
 		"graph_version": GRAPH_VERSION,
 		"checkpoint_backend": workflow.checkpoint_backend,
-		"planning_model": "deepseek",
+		"planning_model": settings.deepseek_reasoning_model,
 		"planning_fallback_model": "qwen",
-		"control_model": "qwen",
-		"model": settings.qwen_model,
+		"control_model": settings.deepseek_fast_model,
+		"analysis_model": settings.deepseek_fast_model,
+		"fallback_model": settings.qwen_model,
+		"model": settings.deepseek_reasoning_model,
 		"hermes": "configured" if settings.hermes_api_key else "unavailable",
-		"deepseek": workflow.deepseek.health() if settings.deepseek_token else {"state": "unavailable"},
+		"deepseek": workflow.deepseek.health() if settings.deepseek_ready else {"state": "unavailable"},
 		"tools": workflow.registry.names(),
 		"queued": queue.qsize(),
 		"workers": len(workers),
@@ -189,17 +191,36 @@ def classify(request: ClassifyRequest) -> dict:
 	if any(word in message for word in objects) and any(word in message for word in actions):
 		return {"intent": "lead_discovery", "confidence": 1.0}
 	try:
-		result = QwenClient(settings).json(
-			"判断用户请求属于 lead_discovery（联网找招标、采购或销售线索）还是 desktop（其他桌面任务）。只输出 JSON。",
+		result = workflow.deepseek.json(
+			"判断请求属于 lead_discovery（联网找招标、采购或销售线索）还是 desktop（其他桌面任务）。必须输出 json 对象。",
 			f'{{"message": {message!r}, "schema": {{"intent": "lead_discovery|desktop", "confidence": "0-1"}}}}',
 			{"intent": "desktop", "confidence": 0},
-			timeout=6,
-			max_attempts=1,
+			model=settings.deepseek_fast_model,
+			timeout=20,
+			max_attempts=2,
+			max_tokens=500,
+			thinking=False,
+			purpose="intent_classification",
 		)
 		intent = result.get("intent") if isinstance(result, dict) else "desktop"
 		return {"intent": intent if intent in {"lead_discovery", "desktop"} else "desktop", "confidence": result.get("confidence", 0)}
 	except Exception:
-		return {"intent": "desktop", "confidence": 0}
+		try:
+			result = QwenClient(settings).json(
+				"判断用户请求属于 lead_discovery（联网找招标、采购或销售线索）还是 desktop（其他桌面任务）。只输出 JSON。",
+				f'{{"message": {message!r}, "schema": {{"intent": "lead_discovery|desktop", "confidence": "0-1"}}}}',
+				{"intent": "desktop", "confidence": 0},
+				timeout=6,
+				max_attempts=1,
+				purpose="intent_classification_fallback",
+			)
+			intent = result.get("intent") if isinstance(result, dict) else "desktop"
+			return {
+				"intent": intent if intent in {"lead_discovery", "desktop"} else "desktop",
+				"confidence": result.get("confidence", 0),
+			}
+		except Exception:
+			return {"intent": "desktop", "confidence": 0}
 
 
 @app.post("/v1/runs", dependencies=[Depends(authorize)])
