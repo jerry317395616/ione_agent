@@ -5,7 +5,7 @@ from app.contracts import AgentDecision, AgentToolCall
 from app.search_queries import build_search_queries
 from app.settings import Settings
 from app.store import RunStore
-from app.workflow import LeadWorkflow
+from app.workflow import LeadWorkflow, ReviewCandidatesArguments
 
 
 def test_parse_json_accepts_fenced_payload():
@@ -73,6 +73,74 @@ def test_fallback_analysis_preserves_verified_evidence():
 	assert items[0]["evidence"]
 	assert items[0]["relevance_score"] >= 70
 	assert items[0]["risk_level"] == "中"
+
+
+def test_fallback_review_plan_uses_only_candidate_facts():
+	plan = LeadWorkflow._fallback_review_plan(
+		{
+			"title": "医院信息化建设项目",
+			"project_number": "XM-001",
+			"deadline": "2026-08-20T09:00:00",
+			"purchaser": "示例医院",
+			"qualification_requirements": "具有独立承担民事责任的能力",
+			"source_url": "https://www.ccgp.gov.cn/tender/1",
+		}
+	)
+	assert "XM-001" in plan
+	assert "2026-08-20T09:00:00" in plan
+	assert "示例医院" in plan
+	assert "https://www.ccgp.gov.cn/tender/1" in plan
+
+
+def test_review_completes_when_deepseek_and_qwen_both_timeout(tmp_path: Path):
+	settings = Settings(
+		api_token="token",
+		data_dir=tmp_path,
+		qwen_base_url="http://qwen/v1",
+		qwen_api_key="key",
+		qwen_model="qwen",
+		hermes_url="http://hermes",
+		hermes_api_key="key",
+		searxng_url="http://search",
+		deepseek_url="http://deepseek",
+		deepseek_token="key",
+		max_concurrent_runs=1,
+	)
+	store = RunStore(tmp_path / "review.sqlite3")
+	run = store.create(
+		{"client_run_id": "RUN-REVIEW", "task_id": "TASK-REVIEW", "user_id": "u", "request": "找线索"}
+	)
+	workflow = LeadWorkflow(settings, store)
+
+	class FailingDeepSeek:
+		def review(self, prompt, **kwargs):
+			raise TimeoutError("deepseek timeout")
+
+	class FailingQwen:
+		def json(self, system, user, default, **kwargs):
+			raise TimeoutError("qwen timeout")
+
+	workflow.deepseek = FailingDeepSeek()
+	workflow.qwen = FailingQwen()
+	result = workflow.review(
+		{
+			"run_id": run["run_id"],
+			"criteria": {"score_threshold": 70},
+			"candidates": [
+				{
+					"title": "医院信息化建设项目",
+					"source_url": "https://www.ccgp.gov.cn/tender/1",
+					"fingerprint": "abc",
+					"relevance_score": 90,
+				}
+			],
+			"partial": False,
+		},
+		ReviewCandidatesArguments(maximum_candidates=20),
+	)
+	assert result["partial"] is True
+	assert result["candidates"][0]["deepseek_plan"]
+	workflow.close()
 
 
 def test_workflow_produces_traceable_candidate(tmp_path: Path):

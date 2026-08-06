@@ -58,13 +58,15 @@ class QwenClient:
 		*,
 		temperature: float = 0.1,
 		timeout: float = 180,
+		max_attempts: int = 2,
 		run_id: str | None = None,
 		purpose: str = "chat",
 	) -> str:
 		started = time.monotonic()
 		request_hash = _request_hash(system, user)
 		last_error: Exception | None = None
-		for attempt in range(2):
+		max_attempts = max(1, min(3, max_attempts))
+		for attempt in range(max_attempts):
 			try:
 				with httpx.Client(timeout=timeout) as client:
 					response = client.post(
@@ -97,7 +99,7 @@ class QwenClient:
 				return content
 			except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
 				last_error = exc
-				if attempt == 0:
+				if attempt + 1 < max_attempts:
 					time.sleep(1)
 					continue
 				if self.audit:
@@ -134,10 +136,22 @@ class QwenClient:
 		user: str,
 		default: Any,
 		*,
+		timeout: float = 180,
+		max_attempts: int = 2,
 		run_id: str | None = None,
 		purpose: str = "structured_output",
 	) -> Any:
-		return parse_json(self.chat(system, user, run_id=run_id, purpose=purpose), default)
+		return parse_json(
+			self.chat(
+				system,
+				user,
+				timeout=timeout,
+				max_attempts=max_attempts,
+				run_id=run_id,
+				purpose=purpose,
+			),
+			default,
+		)
 
 
 class HermesClient:

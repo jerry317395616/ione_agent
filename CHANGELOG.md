@@ -10,6 +10,7 @@
 - Add PostgreSQL checkpoint support with SQLite WAL fallback for single-node deployments.
 - Bound Hermes context and request duration so collected evidence can continue through Qwen when research is slow.
 - Remove nested analysis retries and preserve verified candidates with conservative scoring when Qwen is temporarily unavailable.
+- Bound Qwen review fallback to one 90-second attempt and generate an evidence-only pursuit checklist when both review models are unavailable.
 
 ## 0.3.0
 

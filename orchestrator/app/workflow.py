@@ -545,13 +545,25 @@ class LeadWorkflow:
 				deepseek="已熔断或失败",
 				qwen="正在接管复核",
 			)
-			plans = self.qwen.json(
-				"你是企业招投标顾问。只依据输入证据生成跟进方案，只输出 JSON 数组。",
-				prompt,
-				[],
-				run_id=run_id,
-				purpose="lead_review_fallback",
-			)
+			try:
+				plans = self.qwen.json(
+					"你是企业招投标顾问。只依据输入证据生成跟进方案，只输出 JSON 数组。",
+					prompt,
+					[],
+					timeout=90,
+					max_attempts=1,
+					run_id=run_id,
+					purpose="lead_review_fallback",
+				)
+			except Exception as fallback_exc:
+				plans = []
+				self.store.stage(
+					run_id,
+					"reviewing",
+					85,
+					f"Qwen 复核超时，正在生成证据驱动的保守方案：{type(fallback_exc).__name__}",
+					qwen="已降级",
+				)
 			if not isinstance(plans, list):
 				plans = []
 		plan_map = {
@@ -569,7 +581,11 @@ class LeadWorkflow:
 		)
 		matched = 0
 		for candidate in qualified:
-			candidate["deepseek_plan"] = plan_map.get(candidate.get("fingerprint")) or fallback_plan or ""
+			candidate["deepseek_plan"] = (
+				plan_map.get(candidate.get("fingerprint"))
+				or fallback_plan
+				or self._fallback_review_plan(candidate)
+			)
 			if candidate["deepseek_plan"]:
 				matched += 1
 		if matched < len(qualified):
@@ -582,6 +598,36 @@ class LeadWorkflow:
 			deepseek="已完成" if matched == len(qualified) else "部分完成",
 		)
 		return {"candidates": candidates, "partial": partial}
+
+	@staticmethod
+	def _fallback_review_plan(candidate: dict[str, Any]) -> str:
+		title = str(candidate.get("title") or "该项目").strip()
+		project_number = str(candidate.get("project_number") or "").strip()
+		deadline = str(candidate.get("deadline") or "").strip()
+		purchaser = str(candidate.get("purchaser") or "").strip()
+		agency = str(candidate.get("agency") or "").strip()
+		requirements = str(
+			candidate.get("qualification_requirements")
+			or candidate.get("requirement_summary")
+			or ""
+		).strip()
+		source_url = str(candidate.get("source_url") or "").strip()
+		steps = [f"核验《{title}》公告原文及后续更正公告。"]
+		if project_number:
+			steps.append(f"以项目编号 {project_number} 建立内部机会档案并检查重复记录。")
+		if deadline:
+			steps.append(f"围绕截止时间 {deadline} 倒排报名、答疑、方案、报价和投标文件准备计划。")
+		else:
+			steps.append("从公告或招标文件核实报名、答疑、投标截止和开标时间。")
+		contacts = "、".join(value for value in (purchaser, agency) if value)
+		if contacts:
+			steps.append(f"通过公告公开渠道联系 {contacts}，确认采购范围、文件获取方式和澄清安排。")
+		if requirements:
+			steps.append(f"逐项核对资格与需求：{requirements[:240]}")
+		steps.append("组织销售、售前和交付人员完成匹配度、资质、案例、成本及风险复核后再决定是否跟进。")
+		if source_url:
+			steps.append(f"全程以官方来源为准：{source_url}")
+		return "\n".join(f"{index}. {step}" for index, step in enumerate(steps, start=1))
 
 	def finish(
 		self,
