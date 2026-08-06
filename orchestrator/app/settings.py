@@ -30,7 +30,7 @@ class Settings:
 	max_agent_iterations: int = 12
 	agent_run_budget_seconds: int = 1800
 	hermes_request_timeout_seconds: int = 240
-	deepseek_job_timeout_seconds: int = 900
+	deepseek_job_timeout_seconds: int = 180
 	deepseek_breaker_failures: int = 3
 	deepseek_breaker_cooldown_seconds: int = 300
 	checkpoint_database_url: str = ""
@@ -64,7 +64,7 @@ class Settings:
 				60, min(600, int(os.getenv("HERMES_REQUEST_TIMEOUT_SECONDS", "240")))
 			),
 			deepseek_job_timeout_seconds=max(
-				60, min(1800, int(os.getenv("DEEPSEEK_JOB_TIMEOUT_SECONDS", "900")))
+				60, min(1800, int(os.getenv("DEEPSEEK_JOB_TIMEOUT_SECONDS", "180")))
 			),
 			deepseek_breaker_failures=max(
 				1, min(10, int(os.getenv("DEEPSEEK_BREAKER_FAILURES", "3")))
