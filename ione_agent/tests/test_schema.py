@@ -98,6 +98,16 @@ def test_crm_conversion_skips_missing_link_master_data():
 	assert '"crm_lead": ["is", "set"]' in service
 
 
+def test_candidate_source_url_supports_long_public_links():
+	schema_path = DOCTYPE_ROOT / "i_one_lead_candidate" / "i_one_lead_candidate.json"
+	schema = json.loads(schema_path.read_text(encoding="utf-8"))
+	fields = {field["fieldname"]: field for field in schema["fields"]}
+	assert fields["source_url"]["fieldtype"] == "Small Text"
+	service = LEAD_SERVICE.read_text(encoding="utf-8")
+	assert "def _data_value" in service
+	assert '"source_url": item.get("source_url")' in service
+
+
 def test_terminal_lead_run_reports_frappe_sync_completion():
 	api = AGENT_API.read_text(encoding="utf-8")
 	assert "候选线索已写入 Frappe，部分结果待人工复核" in api

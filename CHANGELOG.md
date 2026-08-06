@@ -12,6 +12,7 @@
 - Remove nested analysis retries and preserve verified candidates with conservative scoring when Qwen is temporarily unavailable.
 - Bound Qwen review fallback to one 90-second attempt and generate an evidence-only pursuit checklist when both review models are unavailable.
 - Reduce the default DeepSeek web review budget from 15 minutes to 3 minutes.
+- Store full source URLs as small text and normalize bounded Frappe Data fields before candidate ingestion.
 
 ## 0.3.0
 

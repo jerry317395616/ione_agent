@@ -30,7 +30,7 @@
   {"fieldname":"contact_email","fieldtype":"Data","label":"电子邮箱"},
   {"fieldname":"source_section","fieldtype":"Section Break","label":"来源与证据"},
   {"fieldname":"source_name","fieldtype":"Data","label":"来源网站","read_only":1},
-  {"fieldname":"source_url","fieldtype":"Data","label":"原文地址","reqd":1,"read_only":1},
+  {"fieldname":"source_url","fieldtype":"Small Text","label":"原文地址","reqd":1,"read_only":1},
   {"fieldname":"fingerprint","fieldtype":"Data","label":"去重指纹","unique":1,"read_only":1},
   {"fieldname":"evidence_json","fieldtype":"Code","label":"证据数据","options":"JSON","read_only":1},
   {"fieldname":"analysis_section","fieldtype":"Section Break","label":"AI 分析"},

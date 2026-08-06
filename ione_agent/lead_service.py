@@ -83,31 +83,36 @@ def create_task(*, user: str, request: str, agent_run: str, profile: str | None 
 	).insert(ignore_permissions=True)
 
 
+def _data_value(value: Any, max_length: int = 140) -> str | None:
+	text = str(value or "").strip()
+	return text[:max_length] or None
+
+
 def _candidate_values(task, item: dict[str, Any]) -> dict[str, Any]:
 	return {
 		"doctype": CANDIDATE_DTYPE,
 		"user": task.user,
 		"task": task.name,
-		"title": item.get("title") or "未命名采购项目",
-		"status": item.get("status") or "已分析",
+		"title": _data_value(item.get("title") or "未命名采购项目"),
+		"status": _data_value(item.get("status") or "已分析"),
 		"relevance_score": flt(item.get("relevance_score")),
 		"confidence": flt(item.get("confidence")),
 		"risk_level": item.get("risk_level") or "中",
-		"project_number": item.get("project_number"),
-		"industry": item.get("industry"),
-		"region": item.get("region"),
-		"procurement_method": item.get("procurement_method"),
-		"purchaser": item.get("purchaser"),
-		"agency": item.get("agency"),
+		"project_number": _data_value(item.get("project_number")),
+		"industry": _data_value(item.get("industry")),
+		"region": _data_value(item.get("region")),
+		"procurement_method": _data_value(item.get("procurement_method")),
+		"purchaser": _data_value(item.get("purchaser")),
+		"agency": _data_value(item.get("agency")),
 		"published_at": normalize_datetime(item.get("published_at")),
 		"deadline": normalize_datetime(item.get("deadline")),
 		"budget": flt(item.get("budget")),
-		"contact_name": item.get("contact_name"),
-		"contact_phone": item.get("contact_phone"),
-		"contact_email": item.get("contact_email"),
-		"source_name": item.get("source_name"),
+		"contact_name": _data_value(item.get("contact_name")),
+		"contact_phone": _data_value(item.get("contact_phone")),
+		"contact_email": _data_value(item.get("contact_email")),
+		"source_name": _data_value(item.get("source_name")),
 		"source_url": item.get("source_url"),
-		"fingerprint": item.get("fingerprint"),
+		"fingerprint": _data_value(item.get("fingerprint")),
 		"evidence_json": json.dumps(item.get("evidence") or [], ensure_ascii=False, indent=2),
 		"requirement_summary": item.get("requirement_summary"),
 		"qualification_requirements": item.get("qualification_requirements"),

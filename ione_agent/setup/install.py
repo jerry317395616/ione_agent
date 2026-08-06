@@ -21,7 +21,7 @@ def _ensure_crm_fields() -> None:
 				{"fieldname": "custom_ione_ai_section", "label": "I-ONE AI 获客", "fieldtype": "Section Break", "insert_after": "source"},
 				{"fieldname": "custom_ione_candidate", "label": "AI 候选线索", "fieldtype": "Link", "options": "I-ONE Lead Candidate", "insert_after": "custom_ione_ai_section", "read_only": 1},
 				{"fieldname": "custom_ione_project_number", "label": "招标项目编号", "fieldtype": "Data", "insert_after": "custom_ione_candidate", "read_only": 1},
-				{"fieldname": "custom_ione_source_url", "label": "招标原文", "fieldtype": "Data", "insert_after": "custom_ione_project_number", "read_only": 1},
+				{"fieldname": "custom_ione_source_url", "label": "招标原文", "fieldtype": "Small Text", "insert_after": "custom_ione_project_number", "read_only": 1},
 				{"fieldname": "custom_ione_budget", "label": "项目预算", "fieldtype": "Currency", "insert_after": "custom_ione_source_url", "read_only": 1},
 				{"fieldname": "custom_ione_deadline", "label": "投标截止时间", "fieldtype": "Datetime", "insert_after": "custom_ione_budget", "read_only": 1},
 				{"fieldname": "custom_ione_relevance_score", "label": "AI 相关度", "fieldtype": "Percent", "insert_after": "custom_ione_deadline", "read_only": 1},
