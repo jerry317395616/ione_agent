@@ -16,6 +16,9 @@ Use the manager MCP tools as the only CRM data interface. Never invent a record 
 5. Create only drafts with `frappe_create_document`; use `frappe_update_document` for explicit changes.
 6. Read the returned document name and summarize exactly what was persisted and what still needs human action.
 
+When the request combines a detailed customer proposal, Word output, Lead conversion and Deal
+attachment, load and follow the `lead-proposal-to-deal` skill instead of improvising the sequence.
+
 ## Rules
 
 - Preserve source URLs and evidence in normal fields or a private Markdown attachment.
