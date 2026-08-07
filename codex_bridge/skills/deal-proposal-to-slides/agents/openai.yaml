@@ -1,0 +1,4 @@
+interface:
+  display_name: "商机方案客户演示"
+  short_description: "读取商机方案并生成可编辑、可放映的客户商业演示文稿"
+  default_prompt: "使用 $deal-proposal-to-slides 把指定商机的 Word 方案制作成面向客户的 Frappe Slides 商业演示。"

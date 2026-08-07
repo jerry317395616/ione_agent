@@ -169,11 +169,13 @@ enabled_tools = [
   "frappe_list_documents",
   "frappe_get_document",
   "frappe_list_attachments",
+  "frappe_read_word_attachment",
   "frappe_create_document",
   "frappe_update_document",
   "frappe_attach_text_file",
   "frappe_attach_word_file",
   "frappe_convert_lead_to_deal",
+  "frappe_upsert_deal_presentation",
 ]
 '''
 		config_path = self.codex_home / "config.toml"
