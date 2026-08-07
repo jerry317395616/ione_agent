@@ -153,7 +153,9 @@ class CodexBridge:
 							continue
 						yield event
 						if event.get("method") == "bridge/processExited":
-							raise AppServerError("Codex App Server exited during the turn")
+							raise AppServerError(
+								str(params.get("message") or "Codex App Server exited during the turn")
+							)
 						if event.get("method") == "turn/completed":
 							return
 				except asyncio.CancelledError:

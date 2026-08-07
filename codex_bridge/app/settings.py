@@ -52,6 +52,7 @@ class Settings:
 	network_access: bool
 	developer_instructions: str
 	request_timeout_seconds: int
+	app_server_message_limit_bytes: int
 	keepalive_seconds: int
 	frappe_mcp_url: str
 	frappe_auth_header: str
@@ -78,6 +79,13 @@ class Settings:
 			network_access=as_bool("IONE_CODEX_NETWORK_ACCESS", True),
 			developer_instructions=os.getenv("IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS).strip(),
 			request_timeout_seconds=max(5, min(120, int(os.getenv("IONE_CODEX_RPC_TIMEOUT_SECONDS", "30")))),
+			app_server_message_limit_bytes=max(
+				1024 * 1024,
+				min(
+					64 * 1024 * 1024,
+					int(os.getenv("IONE_CODEX_MESSAGE_LIMIT_BYTES", str(16 * 1024 * 1024))),
+				),
+			),
 			keepalive_seconds=max(5, min(60, int(os.getenv("IONE_CODEX_KEEPALIVE_SECONDS", "10")))),
 			frappe_mcp_url=os.getenv("IONE_FRAPPE_MCP_URL", "").strip(),
 			frappe_auth_header=os.getenv("IONE_FRAPPE_AUTH_HEADER", "").strip(),

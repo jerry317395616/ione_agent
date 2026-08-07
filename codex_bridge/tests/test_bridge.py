@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
+from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, latest_user_text, stream_chunk
 from app.settings import Settings
 from app.store import ConversationStore
@@ -53,6 +55,7 @@ def test_model_catalog_has_selected_model(monkeypatch, tmp_path) -> None:
 	assert models[settings.model]["context_window"] == 1000000
 	assert models[settings.model]["include_apps_usage_instructions"] is False
 	assert models[settings.model]["include_skills_usage_instructions"] is True
+	assert settings.app_server_message_limit_bytes > 64 * 1024
 
 
 def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None:
@@ -84,6 +87,23 @@ def test_stream_chunk_is_openai_compatible() -> None:
 	chunk = stream_chunk("chatcmpl-test", "ione-agent", {"content": "hello"})
 	payload = json.loads(chunk.removeprefix("data: ").strip())
 	assert payload["choices"][0]["delta"]["content"] == "hello"
+
+
+def test_app_server_health_requires_live_output_reader() -> None:
+	async def probe() -> None:
+		server = CodexAppServer(SimpleNamespace())
+		server.process = SimpleNamespace(returncode=None)
+		assert server.alive is False
+
+		reader_task = asyncio.create_task(asyncio.sleep(10))
+		server.reader_task = reader_task
+		assert server.alive is True
+
+		reader_task.cancel()
+		await asyncio.gather(reader_task, return_exceptions=True)
+		assert server.alive is False
+
+	asyncio.run(probe())
 
 
 class FailingBridge:

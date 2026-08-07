@@ -36,7 +36,12 @@ class CodexAppServer:
 
 	@property
 	def alive(self) -> bool:
-		return self.process is not None and self.process.returncode is None
+		return (
+			self.process is not None
+			and self.process.returncode is None
+			and self.reader_task is not None
+			and not self.reader_task.done()
+		)
 
 	async def start(self) -> None:
 		if self.alive:
@@ -44,6 +49,9 @@ class CodexAppServer:
 		async with self.start_lock:
 			if self.alive:
 				return
+			if self.process is not None:
+				await self._terminate_process(self.process)
+				self.process = None
 			self.settings.prepare()
 			self.process = await asyncio.create_subprocess_exec(
 				str(self.settings.codex_bin),
@@ -55,6 +63,7 @@ class CodexAppServer:
 				stderr=asyncio.subprocess.PIPE,
 				cwd=self.settings.workspace_root,
 				env=self.settings.process_environment(),
+				limit=self.settings.app_server_message_limit_bytes,
 			)
 			self.generation += 1
 			self.loaded_threads.clear()
@@ -75,21 +84,34 @@ class CodexAppServer:
 	async def stop(self) -> None:
 		process = self.process
 		self.process = None
-		if process and process.returncode is None:
-			process.terminate()
-			try:
-				await asyncio.wait_for(process.wait(), timeout=10)
-			except TimeoutError:
-				process.kill()
-				await process.wait()
-		for task in (self.reader_task, self.stderr_task):
-			if task:
+		reader_task = self.reader_task
+		stderr_task = self.stderr_task
+		self.reader_task = None
+		self.stderr_task = None
+		for task in (reader_task, stderr_task):
+			if task and task is not asyncio.current_task():
 				task.cancel()
+		if process:
+			await self._terminate_process(process)
 		await asyncio.gather(
-			*(task for task in (self.reader_task, self.stderr_task) if task),
+			*(
+				task
+				for task in (reader_task, stderr_task)
+				if task and task is not asyncio.current_task()
+			),
 			return_exceptions=True,
 		)
 		self._fail_pending(AppServerError("Codex App Server stopped"))
+
+	async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
+		if process.returncode is not None:
+			return
+		process.terminate()
+		try:
+			await asyncio.wait_for(process.wait(), timeout=10)
+		except TimeoutError:
+			process.kill()
+			await process.wait()
 
 	async def request(self, method: str, params: dict[str, Any]) -> Any:
 		await self.start()
@@ -119,9 +141,11 @@ class CodexAppServer:
 			await process.stdin.drain()
 
 	async def _read_stdout(self) -> None:
-		assert self.process and self.process.stdout
+		process = self.process
+		assert process and process.stdout
+		failure = AppServerError("Codex App Server exited")
 		try:
-			while line := await self.process.stdout.readline():
+			while line := await process.stdout.readline():
 				try:
 					message = json.loads(line)
 				except json.JSONDecodeError:
@@ -148,12 +172,25 @@ class CodexAppServer:
 				await self._publish(message)
 		except asyncio.CancelledError:
 			raise
-		except Exception:
+		except Exception as exc:
 			logger.exception("Codex App Server stdout reader failed")
+			failure = AppServerError(f"Codex App Server output reader failed: {exc}")
 		finally:
+			owned_process = self.process is process
+			stderr_task = self.stderr_task
+			if owned_process:
+				self.process = None
+				self.reader_task = None
+				self.stderr_task = None
 			self.loaded_threads.clear()
-			self._fail_pending(AppServerError("Codex App Server exited"))
-			await self._publish({"method": "bridge/processExited", "params": {}})
+			self._fail_pending(failure)
+			await self._publish(
+				{"method": "bridge/processExited", "params": {"message": str(failure)}}
+			)
+			if owned_process:
+				if stderr_task and stderr_task is not asyncio.current_task():
+					stderr_task.cancel()
+				await self._terminate_process(process)
 
 	async def _read_stderr(self) -> None:
 		assert self.process and self.process.stderr
@@ -238,4 +275,3 @@ class CodexAppServer:
 			raise AppServerError("Codex App Server did not return a thread id")
 		self.loaded_threads.add(thread_id)
 		return thread_id
-

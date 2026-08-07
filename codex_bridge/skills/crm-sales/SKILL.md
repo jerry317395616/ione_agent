@@ -16,6 +16,12 @@ Use the manager MCP tools as the only CRM data interface. Never invent a record 
 5. Create only drafts with `frappe_create_document`; use `frappe_update_document` for explicit changes.
 6. Read the returned document name and summarize exactly what was persisted and what still needs human action.
 
+For requests to list all records, call `frappe_list_documents` with only the fields needed for the
+answer and a page size no larger than 100. Begin with `start=0`, then continue with the returned
+`next_start` while `has_more` is true. Do not request descriptions or attachment bodies for a
+summary list. Preserve the user's request for all records instead of silently stopping at the first
+page.
+
 When the request combines a detailed customer proposal, Word output, Lead conversion and Deal
 attachment, load and follow the `lead-proposal-to-deal` skill instead of improvising the sequence.
 
