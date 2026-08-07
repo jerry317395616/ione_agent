@@ -1,0 +1,57 @@
+{
+  "reference": "IDV-2026-00001",
+  "quality": "draft",
+  "manifest": {
+    "title": "智慧医疗运营解决方案",
+    "customer": "示例医院",
+    "brand": "I-ONE AI",
+    "template": "medical-enterprise",
+    "aspect_ratio": "16:9",
+    "language": "zh-CN",
+    "call_to_action": "预约方案演示与业务诊断",
+    "scenes": [
+      {
+        "kind": "cover",
+        "title": "智慧医疗运营解决方案",
+        "subtitle": "数据驱动管理，AI 协同业务",
+        "narration": "面向医疗机构的智慧运营解决方案。",
+        "duration_seconds": 5
+      },
+      {
+        "kind": "context",
+        "title": "业务背景",
+        "bullets": ["多系统数据分散", "管理过程缺少统一视图"],
+        "narration": "医疗运营需要打通数据和业务流程。",
+        "duration_seconds": 5
+      },
+      {
+        "kind": "challenge",
+        "title": "核心挑战",
+        "bullets": ["指标口径不一致", "分析响应速度慢", "业务协同成本高"],
+        "narration": "统一口径、及时分析与高效协同是建设重点。",
+        "duration_seconds": 5
+      },
+      {
+        "kind": "solution",
+        "title": "总体方案",
+        "bullets": ["统一数据底座", "智能运营工作台", "全过程任务闭环"],
+        "narration": "方案以统一数据底座连接智能分析和任务闭环。",
+        "duration_seconds": 5
+      },
+      {
+        "kind": "value",
+        "title": "预期价值",
+        "bullets": ["提升运营透明度", "缩短决策周期", "沉淀可复用能力"],
+        "narration": "帮助管理团队提升透明度、效率与持续改进能力。",
+        "duration_seconds": 5
+      },
+      {
+        "kind": "closing",
+        "title": "携手建设智慧运营新体系",
+        "subtitle": "I-ONE AI",
+        "narration": "期待与您共同推进智慧医疗运营建设。",
+        "duration_seconds": 5
+      }
+    ]
+  }
+}

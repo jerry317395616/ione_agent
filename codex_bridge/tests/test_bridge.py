@@ -79,6 +79,7 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert (settings.codex_home / "skills" / "crm-sales" / "SKILL.md").is_file()
 	assert (settings.codex_home / "skills" / "lead-proposal-to-deal" / "SKILL.md").is_file()
 	assert (settings.codex_home / "skills" / "deal-proposal-to-slides" / "SKILL.md").is_file()
+	assert (settings.codex_home / "skills" / "deal-materials-to-promo-video" / "SKILL.md").is_file()
 	assert '"frappe_list_attachments"' in config
 	assert '"frappe_attach_word_file"' in config
 	assert '"frappe_convert_lead_to_deal"' in config

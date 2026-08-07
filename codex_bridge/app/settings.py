@@ -176,6 +176,10 @@ enabled_tools = [
   "frappe_attach_word_file",
   "frappe_convert_lead_to_deal",
   "frappe_upsert_deal_presentation",
+  "frappe_get_deal_video_sources",
+  "frappe_upsert_deal_video",
+  "frappe_submit_deal_video_render",
+  "frappe_get_deal_video_render_status",
 ]
 '''
 		config_path = self.codex_home / "config.toml"

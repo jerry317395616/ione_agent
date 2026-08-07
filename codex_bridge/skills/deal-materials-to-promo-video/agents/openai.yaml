@@ -1,0 +1,4 @@
+interface:
+  display_name: "商机宣传视频"
+  short_description: "根据商机、Word方案、Slides和附件生成客户宣传视频"
+  default_prompt: "使用 $deal-materials-to-promo-video 根据指定商机资料生成客户宣传视频并回写商机附件。"
