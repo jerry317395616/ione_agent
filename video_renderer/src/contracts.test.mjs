@@ -37,3 +37,27 @@ test('builds deterministic subtitles from scene timing', () => {
   assert.match(srt, /00:00:00,000 --> 00:00:05,000/);
   assert.match(srt, /确认试点范围/);
 });
+
+test('validates a platform film without weakening deal video boundaries', () => {
+  const scenes = Array.from({length: 14}, (_, index) => ({
+    code: `scene-${String(index + 1).padStart(2, '0')}`,
+    kind: index === 0 ? 'brand' : index === 13 ? 'closing' : index === 1 ? 'tension' : 'business',
+    kicker: 'I-ONE AI',
+    title: `平台场景 ${index + 1}`,
+    narration: `这是平台宣传片第 ${index + 1} 个场景的旁白。`,
+    duration_seconds: 9,
+  }));
+  const result = validateRenderRequest({
+    reference: 'IONE-PLATFORM-2026',
+    quality: 'final',
+    manifest: {
+      format: 'platform-film-v1',
+      title: 'I-ONE AI 平台宣传片',
+      metrics: [{value: '26', label: '已接入应用'}],
+      scenes,
+    },
+  });
+  assert.equal(result.composition_id, 'PlatformFilm');
+  assert.equal(result.manifest.duration_seconds, 126);
+  assert.equal(result.manifest.scenes.length, 14);
+});

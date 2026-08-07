@@ -6,7 +6,12 @@
   "scripts": {
     "start": "node src/server.mjs",
     "test": "node --test src/contracts.test.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "capture:platform": "node scripts/capture-platform.mjs",
+    "audio:platform": "python scripts/generate-platform-audio.py",
+    "manifest:platform": "node scripts/build-platform-manifest.mjs",
+    "qa:platform": "node scripts/render-platform-qa.mjs",
+    "render:platform": "node scripts/render-platform-film.mjs"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.507",
@@ -15,5 +20,8 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "remotion": "4.0.507"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
   }
 }

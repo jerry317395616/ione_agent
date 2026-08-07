@@ -89,7 +89,7 @@ const renderJob = async (id) => {
   writeJob(job);
   const serveUrl = await getBundle();
   const inputProps = {manifest: request.manifest, quality: request.quality};
-  const composition = await selectComposition({serveUrl, id: 'DealPromo', inputProps, timeoutInMilliseconds: 120000});
+  const composition = await selectComposition({serveUrl, id: request.composition_id || 'DealPromo', inputProps, timeoutInMilliseconds: 120000});
   job.step = '生成视频画面';
   job.progress = 5;
   writeJob(job);

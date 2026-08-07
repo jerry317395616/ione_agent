@@ -14,3 +14,7 @@ gateway/data/
 gateway/.env
 gateway/vendor/
 .deploy-ufo.tar.gz
+video_renderer/output/
+video_renderer/assets/platform/audio/
+video_renderer/assets/platform/captures/contact-sheet.jpg
+video_renderer/.smoke-data-*/

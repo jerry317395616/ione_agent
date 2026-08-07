@@ -1,0 +1,196 @@
+{
+  "format": "platform-film-v1",
+  "title": "I-ONE AI 平台宣传片",
+  "brand": "I-ONE AI",
+  "tagline": "让复杂组织，像一个系统一样行动",
+  "language": "zh-CN",
+  "aspect_ratio": "16:9",
+  "show_subtitles": true,
+  "metrics": [
+    {"value": "26", "label": "已接入应用"},
+    {"value": "82", "label": "统一工作空间"},
+    {"value": "1", "label": "组织智能入口"}
+  ],
+  "scenes": [
+    {
+      "code": "scene-01",
+      "kind": "brand",
+      "kicker": "I-ONE AI",
+      "title": "让复杂组织\n像一个系统一样行动",
+      "subtitle": "统一业务、数据、知识与智能执行",
+      "narration": "当系统越来越多，真正稀缺的，不是更多软件，而是让整个组织协同思考、统一行动的能力。",
+      "duration_seconds": 8
+    },
+    {
+      "code": "scene-02",
+      "kind": "tension",
+      "kicker": "THE COMPLEXITY GAP",
+      "title": "信息在流动\n行动却被割裂",
+      "subtitle": "系统、数据、流程与人的断点，正在消耗组织效率",
+      "bullets": ["业务分散", "数据延迟", "知识孤立", "决策滞后"],
+      "narration": "传统数字化把业务装进不同系统。数据在流动，流程却被切断；信息不断增加，决策仍然依赖人工搬运。",
+      "duration_seconds": 10
+    },
+    {
+      "code": "scene-03",
+      "kind": "operating-system",
+      "kicker": "ONE OPERATING SYSTEM",
+      "title": "一个平台\n贯通每一次经营动作",
+      "subtitle": "从记录事实，到理解业务，再到推动执行",
+      "layers": ["统一身份与权限", "统一业务对象", "统一流程与协作", "统一智能执行"],
+      "narration": "I-ONE AI 不是又一个孤立应用。它以统一身份、业务对象、流程和智能执行为底座，把分散的软件重新组织成一套运营系统。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-04",
+      "kind": "ai",
+      "kicker": "AI THAT ACTS",
+      "title": "从一句话\n到真实业务结果",
+      "subtitle": "理解意图、调用技能、执行工具、回写业务",
+      "command": "分析本月经营变化，找到高风险客户，并生成跟进任务。",
+      "actions": ["读取权限上下文", "分析经营与客户数据", "生成管理洞察", "创建责任人任务"],
+      "asset": "captures/agent.png",
+      "narration": "在这里，AI 不止回答问题。它理解意图，调用业务技能，在权限范围内读取数据、创建单据、生成内容，并把结果写回系统。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-05",
+      "kind": "business",
+      "kicker": "CORE OPERATIONS",
+      "title": "经营核心\n在同一张业务地图上",
+      "subtitle": "财务、采购、库存、销售、制造、项目与资产",
+      "apps": ["ERPNext", "Payments", "Lending", "Projects", "Manufacturing", "Assets"],
+      "asset": "captures/enterprise.png",
+      "narration": "企业管理覆盖财务、采购、库存、销售、制造、项目、资产、支付与贷款。每一笔交易，都进入同一套可追溯的经营事实。",
+      "duration_seconds": 12
+    },
+    {
+      "code": "scene-06",
+      "kind": "people",
+      "kicker": "PEOPLE & ORGANIZATION",
+      "title": "让组织能力\n持续生长",
+      "subtitle": "从招聘、入职、考勤到绩效、薪酬与人才发展",
+      "apps": ["Frappe HR", "HRP", "Payroll", "Recruitment", "Learning"],
+      "asset": "captures/human-resources.png",
+      "narration": "人力资源与医院 HRP 连接组织、岗位、员工、考勤、绩效和薪酬。人才不再只是档案，而是可以持续发展的组织能力。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-07",
+      "kind": "growth",
+      "kicker": "CUSTOMER GROWTH",
+      "title": "从线索到价值\n每一步都有上下文",
+      "subtitle": "获客、需求分析、商机、方案、服务与复盘",
+      "apps": ["CRM", "Telephony", "Helpdesk", "I-ONE Agent"],
+      "asset": "captures/crm.png",
+      "narration": "CRM、电话、服务台与 AI 获客形成完整增长链路。线索、客户需求、商业方案、跟进任务和服务记录，共享同一份上下文。",
+      "duration_seconds": 12
+    },
+    {
+      "code": "scene-08",
+      "kind": "collaboration",
+      "kicker": "KNOWLEDGE IN MOTION",
+      "title": "知识不再沉睡\n协作不再失焦",
+      "subtitle": "文档、知识库、任务、会议、学习和服务协同",
+      "apps": ["Wiki", "Suite", "Gameplan", "Writer", "Learning", "Helpdesk"],
+      "asset": "captures/wiki.png",
+      "narration": "Wiki、协同办公、Gameplan、Writer、学习与服务台，让文档、任务、讨论和经验沉淀在业务现场，成为下一次行动的起点。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-09",
+      "kind": "insight",
+      "kicker": "DECISION INTELLIGENCE",
+      "title": "看见变化\n理解原因\n推动改进",
+      "subtitle": "统一指标、实时洞察、预测预警与责任闭环",
+      "apps": ["Insights", "Flow", "I-ONE AI", "Scientific AI"],
+      "narration": "数据洞察、Flow 和科学智能把分散指标变成可解释的经营信号。从发生了什么，到为什么发生，再到下一步应该做什么。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-10",
+      "kind": "healthcare",
+      "kicker": "HEALTHCARE OPERATIONS",
+      "title": "面向医疗现场\n连接诊疗与运营",
+      "subtitle": "门诊、住院、检验、康复、急诊与医保结算",
+      "apps": ["Healthcare", "Outpatient", "Inpatient", "Diagnostics", "Rehabilitation", "Emergency"],
+      "asset": "captures/healthcare.png",
+      "narration": "在医疗场景，平台连接患者、预约、门诊、住院、检验、康复、急诊与医保结算，让诊疗服务与运营管理在同一视图中协同。",
+      "duration_seconds": 12
+    },
+    {
+      "code": "scene-11",
+      "kind": "insurance",
+      "kicker": "MEDICAL INSURANCE INTELLIGENCE",
+      "title": "让医保运营\n从事后统计走向主动治理",
+      "subtitle": "DRG/DIP、合规、结算、证据与运营分析",
+      "apps": ["医保智能运营", "DRG/DIP", "合规与结算", "数据与证据", "分析与智能"],
+      "asset": "captures/medical-insurance.png",
+      "narration": "医保智能运营贯通 DRG 与 DIP、合规审核、结算管理、数据证据和运营分析，帮助医院从事后统计走向主动治理。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-12",
+      "kind": "quality",
+      "kicker": "QUALITY BY DESIGN",
+      "title": "质量不是检查结果\n而是持续运行的系统",
+      "subtitle": "标准、病例、指标、改进、认证与科研治理",
+      "apps": ["I-ONE QMS", "病例与质控", "质量指标", "持续改进", "研究治理"],
+      "asset": "captures/quality.png",
+      "narration": "I-ONE QMS 将标准、病例、指标、改进、认证和科研治理连接起来。质量不再停留在检查结果，而成为持续运行的管理系统。",
+      "duration_seconds": 12
+    },
+    {
+      "code": "scene-13",
+      "kind": "screening",
+      "kicker": "PUBLIC HEALTH AT SCALE",
+      "title": "筛查、转诊、随访\n形成闭环",
+      "subtitle": "两癌筛查项目全周期管理",
+      "apps": ["筛查项目", "机构协同", "登记筛查", "转诊随访", "运营看板"],
+      "asset": "captures/screening.png",
+      "narration": "两癌筛查覆盖项目、机构、登记、筛查、转诊和随访全过程，让公共卫生项目在规模化协同中依然清晰可控。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-14",
+      "kind": "education",
+      "kicker": "LEARNING ORGANIZATIONS",
+      "title": "教育与学习\n成为业务的一部分",
+      "subtitle": "课程、学生、教师、评估与组织学习",
+      "apps": ["Education", "Learning", "课程", "评估", "知识库"],
+      "asset": "captures/education.png",
+      "narration": "教育管理与在线学习覆盖课程、学生、教师、评估和知识传播，让学习直接服务于岗位、流程和组织成长。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-15",
+      "kind": "ecosystem",
+      "kicker": "OPEN BY ARCHITECTURE",
+      "title": "开放架构\n让创新持续发生",
+      "subtitle": "低代码、流程、API、MCP、技能与应用生态",
+      "apps": ["Frappe", "Builder", "Flow", "MCP", "Skills", "REST API", "Suite", "Agent"],
+      "asset": "captures/desktop.png",
+      "narration": "基于 Frappe 的开放架构，Builder、Flow、API、MCP 和业务技能共同构成可扩展的平台。新应用可以快速接入，已有能力可以持续演进。",
+      "duration_seconds": 12
+    },
+    {
+      "code": "scene-16",
+      "kind": "trust",
+      "kicker": "TRUST AT THE CORE",
+      "title": "每一次访问可授权\n每一次执行可审计",
+      "subtitle": "权限、审计、版本、备份与可追溯变更",
+      "bullets": ["最小权限", "全程审计", "数据隔离", "版本可控", "持续备份"],
+      "narration": "统一权限、操作审计、数据隔离、版本控制与持续备份贯穿整个平台。AI 的每一次工具调用，也遵循同样的治理边界。",
+      "duration_seconds": 11
+    },
+    {
+      "code": "scene-17",
+      "kind": "closing",
+      "kicker": "I-ONE AI",
+      "title": "把系统连接起来\n把智能带到行动里",
+      "subtitle": "I-ONE AI · 组织智能运营平台",
+      "narration": "I-ONE AI，把系统连接起来，把知识组织起来，把智能带到每一次行动里。今天，从一个真正统一的运营平台开始。",
+      "duration_seconds": 10
+    }
+  ]
+}
