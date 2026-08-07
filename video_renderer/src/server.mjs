@@ -75,7 +75,7 @@ const publicJob = (job) => {
 };
 
 const getBundle = () => {
-  if (!bundlePromise) bundlePromise = bundle({entryPoint});
+  if (!bundlePromise) bundlePromise = bundle({entryPoint, enableCaching: false});
   return bundlePromise;
 };
 
