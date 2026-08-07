@@ -1,0 +1,4 @@
+interface:
+  display_name: "ERPNext 采购"
+  short_description: "处理供应商、物料需求、询报价和采购单据草稿"
+  default_prompt: "使用 ERPNext 采购 Skill 完成受控的采购业务操作。"

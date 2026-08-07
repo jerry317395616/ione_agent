@@ -49,6 +49,8 @@ def health() -> dict:
 		"model": settings.model,
 		"business_orchestration": False,
 		"other_agents": False,
+		"frappe_mcp": settings.mcp_enabled,
+		"business_skills": settings.bundled_skills_dir.is_dir(),
 		"app_server_generation": app_server.generation,
 		"conversations": bridge.store.count(),
 		"time": datetime.now(timezone.utc).isoformat(),
@@ -93,4 +95,3 @@ async def chat_completions(
 		raise HTTPException(status_code=422, detail=str(exc)) from exc
 	except AppServerError as exc:
 		raise HTTPException(status_code=502, detail=str(exc)) from exc
-

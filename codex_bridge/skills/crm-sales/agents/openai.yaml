@@ -1,0 +1,4 @@
+interface:
+  display_name: "CRM 销售"
+  short_description: "管理 CRM 线索、商机、联系人及可追溯的跟进记录"
+  default_prompt: "使用 CRM 销售 Skill 查询或维护 Frappe CRM 业务数据。"

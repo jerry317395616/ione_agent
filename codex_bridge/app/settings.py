@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,11 @@ Do not inspect system configuration, credentials, home directories, or unrelated
 Work only inside the assigned workspace. Never claim that an action succeeded unless you verified it.
 Do not return generic phrases such as 'task completed' instead of answering the user's request.
 There is no business workflow router and no other agent. You are responsible for the complete response.
+When the manager Frappe MCP server is available, use its permission-aware tools for business data.
+Load the matching business Skill before a multi-step CRM, ERPNext, Wiki or medical-insurance task.
+Inspect DocType metadata before writing unfamiliar records. Create or update drafts only, then read back
+the saved document and report its exact DocType and name. Never imply that a document was submitted,
+deleted or approved because those operations are intentionally unavailable.
 """
 
 
@@ -47,6 +53,8 @@ class Settings:
 	developer_instructions: str
 	request_timeout_seconds: int
 	keepalive_seconds: int
+	frappe_mcp_url: str
+	frappe_auth_header: str
 
 	@classmethod
 	def from_environment(cls) -> Settings:
@@ -71,7 +79,17 @@ class Settings:
 			developer_instructions=os.getenv("IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS).strip(),
 			request_timeout_seconds=max(5, min(120, int(os.getenv("IONE_CODEX_RPC_TIMEOUT_SECONDS", "30")))),
 			keepalive_seconds=max(5, min(60, int(os.getenv("IONE_CODEX_KEEPALIVE_SECONDS", "10")))),
+			frappe_mcp_url=os.getenv("IONE_FRAPPE_MCP_URL", "").strip(),
+			frappe_auth_header=os.getenv("IONE_FRAPPE_AUTH_HEADER", "").strip(),
 		)
+
+	@property
+	def mcp_enabled(self) -> bool:
+		return bool(self.frappe_mcp_url and self.frappe_auth_header)
+
+	@property
+	def bundled_skills_dir(self) -> Path:
+		return Path(__file__).resolve().parents[1] / "skills"
 
 	def prepare(self) -> None:
 		if not self.codex_bin.is_file():
@@ -79,23 +97,29 @@ class Settings:
 		for path in (self.codex_home, self.data_dir, self.workspace_root):
 			path.mkdir(parents=True, exist_ok=True)
 			path.chmod(0o700)
+		if self.bundled_skills_dir.is_dir():
+			shutil.copytree(
+				self.bundled_skills_dir,
+				self.codex_home / "skills",
+				dirs_exist_ok=True,
+			)
 		catalog_path = self.codex_home / "models.json"
 		catalog_path.write_text(
 			json.dumps(self.model_catalog(), ensure_ascii=False, indent=2),
 			encoding="utf-8",
 		)
 		catalog_path.chmod(0o600)
-		config = f'''model = "{self.model}"
-model_provider = "{self.model_provider}"
-model_catalog_json = "{catalog_path}"
+		config = f'''model = {json.dumps(self.model)}
+model_provider = {json.dumps(self.model_provider)}
+model_catalog_json = {json.dumps(str(catalog_path))}
 approval_policy = "never"
-sandbox_mode = "{self.sandbox}"
+sandbox_mode = {json.dumps(self.sandbox)}
 web_search = "disabled"
 check_for_update_on_startup = false
 
 [sandbox_workspace_write]
 network_access = {str(self.network_access).lower()}
-writable_roots = ["{self.workspace_root}"]
+writable_roots = [{json.dumps(str(self.workspace_root))}]
 
 [shell_environment_policy]
 inherit = "core"
@@ -110,14 +134,36 @@ memories = false
 [agents]
 enabled = false
 
-[model_providers.{self.model_provider}]
+[model_providers.{json.dumps(self.model_provider)}]
 name = "DeepSeek"
-base_url = "{self.deepseek_api_base}"
+base_url = {json.dumps(self.deepseek_api_base)}
 env_key = "DEEPSEEK_API_KEY"
 wire_api = "responses"
 request_max_retries = 3
 stream_max_retries = 3
 stream_idle_timeout_ms = 300000
+'''
+		if self.mcp_enabled:
+			config += f'''
+
+[mcp_servers.manager]
+url = {json.dumps(self.frappe_mcp_url)}
+env_http_headers = {{ Authorization = "IONE_FRAPPE_AUTH_HEADER" }}
+enabled = true
+required = true
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+default_tools_approval_mode = "auto"
+enabled_tools = [
+  "frappe_get_context",
+  "frappe_search_doctypes",
+  "frappe_get_doctype_meta",
+  "frappe_list_documents",
+  "frappe_get_document",
+  "frappe_create_document",
+  "frappe_update_document",
+  "frappe_attach_text_file",
+]
 '''
 		config_path = self.codex_home / "config.toml"
 		config_path.write_text(config, encoding="utf-8")
@@ -143,7 +189,7 @@ stream_idle_timeout_ms = 300000
 					"availability_nux": None,
 					"upgrade": None,
 					"base_instructions": DEFAULT_INSTRUCTIONS,
-					"include_skills_usage_instructions": False,
+					"include_skills_usage_instructions": True,
 					"include_plugin_usage_instructions": False,
 					"include_apps_usage_instructions": False,
 					"supports_reasoning_summary_parameter": True,
@@ -175,4 +221,6 @@ stream_idle_timeout_ms = 300000
 				"HOME": str(self.codex_home.parent),
 			}
 		)
+		if self.frappe_auth_header:
+			environment["IONE_FRAPPE_AUTH_HEADER"] = self.frappe_auth_header
 		return environment

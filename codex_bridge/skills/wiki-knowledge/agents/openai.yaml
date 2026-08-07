@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki 知识库"
+  short_description: "查询和编写 Wiki 空间、章节页面及 Markdown 来源附件"
+  default_prompt: "使用 Wiki 知识库 Skill 维护企业知识文档。"

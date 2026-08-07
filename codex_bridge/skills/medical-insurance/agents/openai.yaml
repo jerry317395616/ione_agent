@@ -1,0 +1,4 @@
+interface:
+  display_name: "医保智能运营"
+  short_description: "查询医保运营数据并形成最小必要、可追溯的分析结果"
+  default_prompt: "使用医保智能运营 Skill 查询医保业务并保存分析结果。"

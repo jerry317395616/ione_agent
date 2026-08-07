@@ -52,6 +52,28 @@ def test_model_catalog_has_selected_model(monkeypatch, tmp_path) -> None:
 	assert settings.model in models
 	assert models[settings.model]["context_window"] == 1000000
 	assert models[settings.model]["include_apps_usage_instructions"] is False
+	assert models[settings.model]["include_skills_usage_instructions"] is True
+
+
+def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+	monkeypatch.setenv("IONE_FRAPPE_MCP_URL", "https://manager.example/api/mcp")
+	monkeypatch.setenv("IONE_FRAPPE_AUTH_HEADER", "token key:secret")
+	settings = Settings.from_environment()
+	settings.prepare()
+	config = (settings.codex_home / "config.toml").read_text(encoding="utf-8")
+	assert "[mcp_servers.manager]" in config
+	assert 'env_http_headers = { Authorization = "IONE_FRAPPE_AUTH_HEADER" }' in config
+	assert "token key:secret" not in config
+	assert settings.process_environment()["IONE_FRAPPE_AUTH_HEADER"] == "token key:secret"
+	assert (settings.codex_home / "skills" / "crm-sales" / "SKILL.md").is_file()
 
 
 def test_stream_chunk_is_openai_compatible() -> None:
