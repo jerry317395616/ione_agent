@@ -1,15 +1,15 @@
 ---
 name: deal-proposal-to-slides
-description: Turn a CRM Deal's detailed Word proposal into an editable, customer-facing commercial presentation in Frappe Slides. Use when the user asks to make a customer PPT, presentation, roadshow deck, proposal deck, or Slides presentation from a specific business opportunity or its proposal attachment.
+description: Turn a CRM Deal's detailed Word proposal into an editable, customer-facing commercial presentation in Frappe Suite Slides. Use when the user asks to make a customer PPT, presentation, roadshow deck, proposal deck, or Slides presentation from a specific business opportunity or its proposal attachment.
 ---
 
 # Deal Proposal To Slides
 
-Create a concise customer narrative from verified CRM Deal data and its Word proposal, then save it as an editable Frappe Slides presentation linked to the Deal.
+Create a concise customer narrative from verified CRM Deal data and its Word proposal, then save it as an editable Frappe Suite Slides presentation linked to the Deal.
 
 ## Workflow
 
-1. Call `frappe_get_context`. Confirm the current site has `crm`, `ione_core`, and `slides` installed.
+1. Call `frappe_get_context`. Confirm the current site has `crm`, `ione_core`, and `suite` installed. Suite supplies the Slides module; do not require or install a separate `slides` app.
 2. Resolve one exact `CRM Deal` name. If the user supplied only a customer or project name, search and list plausible Deals; do not guess.
 3. Read the Deal with `frappe_get_document`. Treat CRM fields as authoritative for customer identity, amount, stage, owner, and dates.
 4. Call `frappe_list_attachments` and select the most recent relevant `.docx` proposal. Prefer names beginning with `proposal_`; when multiple documents are equally plausible, ask the user which one to use.
@@ -35,4 +35,4 @@ Create a concise customer narrative from verified CRM Deal data and its Word pro
 - The Slides MCP tool reuses the presentation linked to the Deal. Never create a second presentation to recover from an error.
 - Keep presentations private by default. Public access requires explicit user instruction.
 - Do not modify the source Word proposal, Deal stage, amount, owner, or any approval state.
-- If Slides is unavailable, report the exact prerequisite failure. Do not attach a fake PPT or claim success.
+- If Suite Slides is unavailable, report the exact prerequisite failure. Do not attach a fake PPT or claim success.

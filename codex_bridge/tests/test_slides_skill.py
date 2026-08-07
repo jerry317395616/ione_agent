@@ -7,6 +7,8 @@ def test_skill_defines_verified_deal_to_slides_workflow() -> None:
 	content = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
 	assert "frappe_read_word_attachment" in content
 	assert "frappe_upsert_deal_presentation" in content
+	assert "`suite` installed" in content
+	assert "separate `slides` app" in content
 	assert "private by default" in content
 	assert "Never create a second presentation" in content
 

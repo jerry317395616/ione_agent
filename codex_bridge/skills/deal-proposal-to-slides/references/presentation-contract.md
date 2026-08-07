@@ -1,5 +1,7 @@
 # Customer Presentation Contract
 
+The target editor is the Slides module built into Frappe Suite on `manager.myyr.top`. The MCP tool creates a native `Presentation` document with editable `Slide` child rows and a Suite Drive backing file.
+
 ## Recommended Narrative
 
 Use 8-12 slides in this order unless the source proposal clearly needs a different sequence:
