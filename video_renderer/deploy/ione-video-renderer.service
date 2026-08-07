@@ -1,0 +1,32 @@
+[Unit]
+Description=I-ONE Remotion Video Renderer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ioneagent
+Group=ioneagent
+WorkingDirectory=/opt/ione-codex-agent/current/video_renderer
+Environment=HOME=/var/lib/ione-video-renderer
+EnvironmentFile=/etc/ione-video-renderer.env
+ExecStart=/usr/bin/node src/server.mjs
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ione-video-renderer
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
