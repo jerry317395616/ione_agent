@@ -74,6 +74,10 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert "token key:secret" not in config
 	assert settings.process_environment()["IONE_FRAPPE_AUTH_HEADER"] == "token key:secret"
 	assert (settings.codex_home / "skills" / "crm-sales" / "SKILL.md").is_file()
+	assert (settings.codex_home / "skills" / "lead-proposal-to-deal" / "SKILL.md").is_file()
+	assert '"frappe_list_attachments"' in config
+	assert '"frappe_attach_word_file"' in config
+	assert '"frappe_convert_lead_to_deal"' in config
 
 
 def test_stream_chunk_is_openai_compatible() -> None:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "线索方案与商机转化"
+  short_description: "依据指定 CRM 线索生成详细 Word 方案并安全转为商机"
+  default_prompt: "根据指定线索及其附件生成详细中文 Word 方案，确认文件有效后将线索转为商机，并把方案上传到商机附件。"
