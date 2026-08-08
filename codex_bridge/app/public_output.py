@@ -22,6 +22,7 @@ _PUBLIC_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
 	(re.compile(r"/(?:opt|var/lib)/ione-codex-agent(?:/[^\s]*)?", re.IGNORECASE), "[内部路径]"),
 	(re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"), "[安全凭据]"),
 	(re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b", re.IGNORECASE), "Bearer [安全凭据]"),
+	(re.compile(r"\bione1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "[安全身份凭据]"),
 	(re.compile(r"\bmodel_provider\b", re.IGNORECASE), "智能引擎"),
 )
 

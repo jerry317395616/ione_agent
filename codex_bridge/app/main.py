@@ -93,17 +93,28 @@ async def chat_completions(
 	request: ChatCompletionRequest,
 	x_librechat_user_id: str | None = Header(default=None),
 	x_librechat_conversation_id: str | None = Header(default=None),
+	x_ione_manager_user_email: str | None = Header(default=None),
 ):
 	user_id = (x_librechat_user_id or "librechat-user")[:140]
 	conversation_id = (x_librechat_conversation_id or f"conversation-{uuid.uuid4().hex}")[:180]
 	if request.stream:
 		return StreamingResponse(
-			bridge.stream(request, user_id=user_id, conversation_id=conversation_id),
+			bridge.stream(
+				request,
+				user_id=user_id,
+				conversation_id=conversation_id,
+				manager_user_email=x_ione_manager_user_email,
+			),
 			media_type="text/event-stream",
 			headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
 		)
 	try:
-		return await bridge.complete(request, user_id=user_id, conversation_id=conversation_id)
+		return await bridge.complete(
+			request,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			manager_user_email=x_ione_manager_user_email,
+		)
 	except ValueError as exc:
 		raise HTTPException(status_code=422, detail=sanitize_public_text(exc)) from exc
 	except AppServerError as exc:

@@ -37,3 +37,9 @@ Use a dedicated Frappe integration user rather than `Administrator`. Set
 `IONE_FRAPPE_AUTH_HEADER` to `token api_key:api_secret` and grant that user only
 the roles needed by the enabled Skills. Every MCP tool call is recorded in
 `I-ONE MCP Audit Log` on the manager site.
+
+Set `IONE_MANAGER_IDENTITY_SECRET` to the same 32+ character random value as
+`ione_agent_identity_shared_secret` in the Manager site configuration. LibreChat sends the
+authenticated Manager email in a server-side header; the bridge signs a short-lived assertion and
+the Lead creation tool uses it only to assign the new CRM task to that logged-in Manager account.
+The model cannot choose another assignee and the integration user is never used as a fallback.

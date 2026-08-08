@@ -60,6 +60,7 @@ class Settings:
 	keepalive_seconds: int
 	frappe_mcp_url: str
 	frappe_auth_header: str
+	identity_shared_secret: str
 
 	@classmethod
 	def from_environment(cls) -> Settings:
@@ -93,6 +94,7 @@ class Settings:
 			keepalive_seconds=max(5, min(60, int(os.getenv("IONE_CODEX_KEEPALIVE_SECONDS", "10")))),
 			frappe_mcp_url=os.getenv("IONE_FRAPPE_MCP_URL", "").strip(),
 			frappe_auth_header=os.getenv("IONE_FRAPPE_AUTH_HEADER", "").strip(),
+			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
 		)
 
 	@property
@@ -178,6 +180,7 @@ enabled_tools = [
   "frappe_update_document",
   "frappe_attach_text_file",
   "frappe_attach_word_file",
+  "frappe_create_crm_lead_package",
   "frappe_convert_lead_to_deal",
   "frappe_upsert_deal_presentation",
   "frappe_get_deal_video_sources",

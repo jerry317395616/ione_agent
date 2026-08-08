@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.app_server import AppServerError, CodexAppServer
+from app.identity import with_trusted_identity_context
 from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
@@ -123,10 +124,17 @@ class CodexBridge:
 		*,
 		user_id: str,
 		conversation_id: str,
+		manager_user_email: str | None = None,
 	) -> AsyncIterator[dict[str, Any] | None]:
 		text = latest_user_text(request)
 		if not text:
 			raise ValueError("A non-empty user message is required")
+		text = with_trusted_identity_context(
+			text,
+			email=manager_user_email,
+			mcp_url=self.settings.frappe_mcp_url,
+			secret=self.settings.identity_shared_secret,
+		)
 		lock_key = f"{user_id}\0{conversation_id}"
 		async with self.locks[lock_key]:
 			thread_id = await self._thread(user_id, conversation_id)
@@ -179,13 +187,17 @@ class CodexBridge:
 		*,
 		user_id: str,
 		conversation_id: str,
+		manager_user_email: str | None = None,
 	) -> dict[str, Any]:
 		parts: list[str] = []
 		completed_messages: list[str] = []
 		status = "completed"
 		error = ""
 		async for event in self._events(
-			request, user_id=user_id, conversation_id=conversation_id
+			request,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			manager_user_email=manager_user_email,
 		):
 			if event is None:
 				continue
@@ -216,6 +228,7 @@ class CodexBridge:
 		*,
 		user_id: str,
 		conversation_id: str,
+		manager_user_email: str | None = None,
 	) -> AsyncIterator[str]:
 		completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 		yield stream_chunk(completion_id, request.model, {"role": "assistant", "content": ""})
@@ -225,7 +238,10 @@ class CodexBridge:
 		error = ""
 		try:
 			async for event in self._events(
-				request, user_id=user_id, conversation_id=conversation_id
+				request,
+				user_id=user_id,
+				conversation_id=conversation_id,
+				manager_user_email=manager_user_email,
 			):
 				if event is None:
 					yield ": keepalive\n\n"

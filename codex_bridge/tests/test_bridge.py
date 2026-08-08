@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 
 from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, latest_user_text, stream_chunk
+from app.identity import issue_actor_token, with_trusted_identity_context
 from app.public_output import sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
@@ -85,6 +87,7 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert (settings.codex_home / "skills" / "deal-materials-to-promo-video" / "SKILL.md").is_file()
 	assert '"frappe_list_attachments"' in config
 	assert '"frappe_attach_word_file"' in config
+	assert '"frappe_create_crm_lead_package"' in config
 	assert '"frappe_convert_lead_to_deal"' in config
 	assert '"frappe_read_word_attachment"' in config
 	assert '"frappe_upsert_deal_presentation"' in config
@@ -94,6 +97,44 @@ def test_stream_chunk_is_openai_compatible() -> None:
 	chunk = stream_chunk("chatcmpl-test", "ione-agent", {"content": "hello"})
 	payload = json.loads(chunk.removeprefix("data: ").strip())
 	assert payload["choices"][0]["delta"]["content"] == "hello"
+
+
+def test_trusted_identity_context_uses_manager_email() -> None:
+	secret = "identity-secret-longer-than-thirty-two-characters"
+	token = issue_actor_token(
+		email="owner@example.com",
+		audience="manager.myyr.top",
+		secret=secret,
+		now=1_800_000_000,
+	)
+	payload_segment = token.split(".")[1]
+	payload = json.loads(base64.urlsafe_b64decode(payload_segment + "=" * (-len(payload_segment) % 4)))
+	assert payload["email"] == "owner@example.com"
+	assert payload["aud"] == "manager.myyr.top"
+	assert payload["exp"] - payload["iat"] == 600
+
+	text = with_trusted_identity_context(
+		"创建一个医疗行业线索",
+		email="owner@example.com",
+		mcp_url="https://manager.myyr.top/api/method/ione_core.mcp.server.handle_mcp",
+		secret=secret,
+	)
+	assert text.endswith("创建一个医疗行业线索")
+	assert "<ione_trusted_session>" in text
+	assert "actor_token=ione1." in text
+	assert "owner@example.com" not in text
+
+
+def test_trusted_identity_context_ignores_invalid_email() -> None:
+	assert (
+		with_trusted_identity_context(
+			"hello",
+			email="not-an-email",
+			mcp_url="https://manager.myyr.top/api/mcp",
+			secret="identity-secret-longer-than-thirty-two-characters",
+		)
+		== "hello"
+	)
 
 
 def test_app_server_health_requires_live_output_reader() -> None:
@@ -153,6 +194,9 @@ def test_public_output_hides_runtime_and_provider_details() -> None:
 	assert "app server" not in text.lower()
 	assert "sk-1234567890abcdef" not in text
 	assert "I-ONE" in text
+	assert "ione1." not in sanitize_public_text(
+		"credential ione1.eyJlbWFpbCI6Im93bmVyQGV4YW1wbGUuY29tIn0.ABCDEFGHIJKLMNOP"
+	)
 
 
 class SensitiveAnswerBridge:
