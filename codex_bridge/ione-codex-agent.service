@@ -1,5 +1,5 @@
 [Unit]
-Description=I-ONE Agent powered by Codex App Server
+Description=I-ONE Agent managed intelligence service
 After=network-online.target
 Wants=network-online.target
 
@@ -30,4 +30,3 @@ UMask=0077
 
 [Install]
 WantedBy=multi-user.target
-
