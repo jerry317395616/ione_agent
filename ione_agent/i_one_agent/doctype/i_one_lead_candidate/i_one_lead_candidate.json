@@ -37,7 +37,7 @@
   {"fieldname":"requirement_summary","fieldtype":"Long Text","label":"需求摘要","read_only":1},
   {"fieldname":"qualification_requirements","fieldtype":"Long Text","label":"资质要求","read_only":1},
   {"fieldname":"recommendation","fieldtype":"Long Text","label":"跟进建议","read_only":1},
-  {"fieldname":"deepseek_plan","fieldtype":"Long Text","label":"DeepSeek 方案","read_only":1},
+  {"fieldname":"deepseek_plan","fieldtype":"Long Text","label":"I-ONE AI 建议方案","read_only":1},
   {"fieldname":"raw_text","fieldtype":"Long Text","label":"原文摘录","read_only":1},
   {"fieldname":"crm_section","fieldtype":"Section Break","label":"CRM 关联"},
   {"fieldname":"crm_lead","fieldtype":"Link","label":"CRM 线索","options":"CRM Lead","read_only":1},

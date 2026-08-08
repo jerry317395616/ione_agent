@@ -1,7 +1,7 @@
 app_name = "ione_agent"
 app_title = "I-ONE Agent"
 app_publisher = "I-ONE"
-app_description = "融合 LangGraph、Hermes、Qwen、DeepSeek 与 UFO3 的企业智能执行和获客平台"
+app_description = "面向企业业务查询、分析、协作与执行的 I-ONE 智能平台"
 app_email = "317395616@qq.com"
 app_license = "mit"
 

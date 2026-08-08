@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import uuid
 from collections import defaultdict
@@ -13,8 +14,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.app_server import AppServerError, CodexAppServer
+from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
@@ -203,7 +208,7 @@ class CodexBridge:
 			raise AppServerError(error or f"Codex turn ended with status {status}")
 		if not answer:
 			raise AppServerError("Codex completed without an assistant response")
-		return completion_response(request.model, answer)
+		return completion_response(request.model, sanitize_public_text(answer))
 
 	async def stream(
 		self,
@@ -214,7 +219,7 @@ class CodexBridge:
 	) -> AsyncIterator[str]:
 		completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 		yield stream_chunk(completion_id, request.model, {"role": "assistant", "content": ""})
-		sent_text = False
+		parts: list[str] = []
 		completed_messages: list[str] = []
 		status = "completed"
 		error = ""
@@ -223,15 +228,14 @@ class CodexBridge:
 				request, user_id=user_id, conversation_id=conversation_id
 			):
 				if event is None:
-					yield ": codex-app-server keepalive\n\n"
+					yield ": keepalive\n\n"
 					continue
 				method = event.get("method")
 				params = event.get("params") or {}
 				if method == "item/agentMessage/delta" and (
 					delta := str(params.get("delta") or "")
 				):
-					sent_text = True
-					yield stream_chunk(completion_id, request.model, {"content": delta})
+					parts.append(delta)
 				elif method == "item/completed":
 					item = params.get("item") or {}
 					if item.get("type") == "agentMessage" and item.get("text"):
@@ -247,10 +251,25 @@ class CodexBridge:
 		except Exception as exc:
 			status = "failed"
 			error = str(exc)
-		if not sent_text and completed_messages:
-			yield stream_chunk(completion_id, request.model, {"content": completed_messages[-1]})
+		answer = "".join(parts).strip() or (completed_messages[-1].strip() if completed_messages else "")
 		if status != "completed":
-			message = error or f"Codex turn ended with status {status}"
-			yield stream_chunk(completion_id, request.model, {"content": f"\n\n执行失败：{message}"})
+			reference = uuid.uuid4().hex[:10].upper()
+			logger.error(
+				"I-ONE Agent turn failed reference=%s status=%s error=%s",
+				reference,
+				status,
+				error,
+			)
+			answer = public_error_message(reference)
+		elif not answer:
+			reference = uuid.uuid4().hex[:10].upper()
+			logger.error("I-ONE Agent returned no response reference=%s", reference)
+			answer = public_error_message(reference)
+		if answer:
+			yield stream_chunk(
+				completion_id,
+				request.model,
+				{"content": sanitize_public_text(answer)},
+			)
 		yield stream_chunk(completion_id, request.model, {}, finish_reason="stop")
 		yield "data: [DONE]\n\n"

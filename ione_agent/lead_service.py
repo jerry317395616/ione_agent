@@ -145,7 +145,7 @@ def _analysis_markdown(candidate) -> str:
 			"## 跟进建议",
 			candidate.recommendation or "暂无",
 			"",
-			"## DeepSeek 方案",
+			"## I-ONE AI 建议方案",
 			candidate.deepseek_plan or "暂无",
 		]
 	)

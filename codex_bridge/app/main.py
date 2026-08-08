@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -10,7 +11,11 @@ from fastapi.responses import StreamingResponse
 
 from app.app_server import AppServerError, CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge
+from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
+
+
+logger = logging.getLogger(__name__)
 
 settings = Settings.from_environment()
 settings.prepare()
@@ -33,10 +38,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-	title="I-ONE Codex App Server Bridge",
-	description="LibreChat protocol bridge for Codex App Server and DeepSeek",
+	title="I-ONE Agent Service",
+	description="Managed enterprise intelligence service for I-ONE Agent",
 	version="1.0.0",
 	lifespan=lifespan,
+	docs_url=None,
+	redoc_url=None,
+	openapi_url=None,
 )
 
 
@@ -44,14 +52,18 @@ app = FastAPI(
 def health() -> dict:
 	return {
 		"status": "healthy" if app_server.alive else "degraded",
-		"agent_runtime": "codex-app-server",
-		"model_provider": settings.model_provider,
-		"model": settings.model,
-		"business_orchestration": False,
-		"other_agents": False,
-		"frappe_mcp": settings.mcp_enabled,
+		"service": "I-ONE Agent",
+		"time": datetime.now(timezone.utc).isoformat(),
+	}
+
+
+@app.get("/internal/health", dependencies=[Depends(authorize)])
+def internal_health() -> dict:
+	return {
+		"status": "healthy" if app_server.alive else "degraded",
+		"runtime_generation": app_server.generation,
+		"business_connector": settings.mcp_enabled,
 		"business_skills": settings.bundled_skills_dir.is_dir(),
-		"app_server_generation": app_server.generation,
 		"conversations": bridge.store.count(),
 		"time": datetime.now(timezone.utc).isoformat(),
 	}
@@ -63,8 +75,9 @@ async def ready() -> dict:
 		try:
 			await app_server.start()
 		except Exception as exc:
-			raise HTTPException(status_code=503, detail=str(exc)) from exc
-	return {"ready": True, "runtime": "codex-app-server"}
+			logger.exception("I-ONE Agent readiness probe failed")
+			raise HTTPException(status_code=503, detail=public_error_message()) from exc
+	return {"ready": True, "service": "I-ONE Agent"}
 
 
 @app.get("/v1/models", dependencies=[Depends(authorize)])
@@ -92,6 +105,8 @@ async def chat_completions(
 	try:
 		return await bridge.complete(request, user_id=user_id, conversation_id=conversation_id)
 	except ValueError as exc:
-		raise HTTPException(status_code=422, detail=str(exc)) from exc
+		raise HTTPException(status_code=422, detail=sanitize_public_text(exc)) from exc
 	except AppServerError as exc:
-		raise HTTPException(status_code=502, detail=str(exc)) from exc
+		reference = uuid.uuid4().hex[:10].upper()
+		logger.exception("I-ONE Agent request failed reference=%s", reference)
+		raise HTTPException(status_code=502, detail=public_error_message(reference)) from exc

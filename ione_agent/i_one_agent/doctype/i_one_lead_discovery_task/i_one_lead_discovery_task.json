@@ -26,7 +26,7 @@
   {"fieldname":"runtime_section","fieldtype":"Section Break","label":"模型执行状态","collapsible":1},
   {"fieldname":"qwen_status","fieldtype":"Data","label":"Qwen 状态","read_only":1},
   {"fieldname":"hermes_status","fieldtype":"Data","label":"Hermes 状态","read_only":1},
-  {"fieldname":"deepseek_status","fieldtype":"Data","label":"DeepSeek 状态","read_only":1},
+  {"fieldname":"deepseek_status","fieldtype":"Data","label":"智能分析状态","read_only":1},
   {"fieldname":"started_at","fieldtype":"Datetime","label":"开始时间","read_only":1},
   {"fieldname":"completed_at","fieldtype":"Datetime","label":"完成时间","read_only":1}
  ],

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, latest_user_text, stream_chunk
+from app.public_output import sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
 
@@ -55,6 +56,8 @@ def test_model_catalog_has_selected_model(monkeypatch, tmp_path) -> None:
 	assert models[settings.model]["context_window"] == 1000000
 	assert models[settings.model]["include_apps_usage_instructions"] is False
 	assert models[settings.model]["include_skills_usage_instructions"] is True
+	assert all("DeepSeek" not in model["display_name"] for model in models.values())
+	assert all("DeepSeek" not in model["description"] for model in models.values())
 	assert settings.app_server_message_limit_bytes > 64 * 1024
 
 
@@ -131,5 +134,52 @@ def test_stream_reports_app_server_failure() -> None:
 		]
 
 	chunks = asyncio.run(collect())
-	assert any("执行失败：app server unavailable" in chunk for chunk in chunks)
+	assert any("I-ONE Agent 暂时无法完成本次请求" in chunk for chunk in chunks)
+	assert all("app server unavailable" not in chunk for chunk in chunks)
 	assert chunks[-1] == "data: [DONE]\n\n"
+
+
+def test_public_output_hides_runtime_and_provider_details() -> None:
+	text = sanitize_public_text(
+		"Codex App Server called DeepSeek V4 Flash at https://api.deepseek.com/v1 "
+		"using DEEPSEEK_API_KEY from /opt/ione-codex-agent/current. "
+		"Fallback app server received sk-1234567890abcdef."
+	)
+	assert "Codex" not in text
+	assert "DeepSeek" not in text
+	assert "api.deepseek.com" not in text
+	assert "DEEPSEEK_API_KEY" not in text
+	assert "/opt/ione-codex-agent" not in text
+	assert "app server" not in text.lower()
+	assert "sk-1234567890abcdef" not in text
+	assert "I-ONE" in text
+
+
+class SensitiveAnswerBridge:
+	async def _events(self, *args, **kwargs):
+		yield {"method": "item/agentMessage/delta", "params": {"delta": "Codex App "}}
+		yield {
+			"method": "item/agentMessage/delta",
+			"params": {"delta": "Server 使用 DeepSeek V4 Flash 完成。"},
+		}
+		yield {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}
+
+
+def test_stream_sanitizes_sensitive_answer_across_deltas() -> None:
+	async def collect() -> str:
+		bridge = object.__new__(SensitiveAnswerBridge)
+		bridge.stream = CodexBridge.stream.__get__(bridge, SensitiveAnswerBridge)
+		request = ChatCompletionRequest(messages=[{"role": "user", "content": "介绍你自己"}], stream=True)
+		return "".join(
+			[
+				chunk
+				async for chunk in bridge.stream(
+					request, user_id="user", conversation_id="conversation"
+				)
+			]
+		)
+
+	chunks = asyncio.run(collect())
+	assert "Codex" not in chunks
+	assert "DeepSeek" not in chunks
+	assert "I-ONE" in chunks
