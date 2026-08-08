@@ -103,6 +103,7 @@ def test_trusted_identity_context_uses_manager_email() -> None:
 	secret = "identity-secret-longer-than-thirty-two-characters"
 	token = issue_actor_token(
 		email="owner@example.com",
+		user_hint="Administrator",
 		audience="manager.myyr.top",
 		secret=secret,
 		now=1_800_000_000,
@@ -110,12 +111,14 @@ def test_trusted_identity_context_uses_manager_email() -> None:
 	payload_segment = token.split(".")[1]
 	payload = json.loads(base64.urlsafe_b64decode(payload_segment + "=" * (-len(payload_segment) % 4)))
 	assert payload["email"] == "owner@example.com"
+	assert payload["user"] == "Administrator"
 	assert payload["aud"] == "manager.myyr.top"
 	assert payload["exp"] - payload["iat"] == 600
 
 	text = with_trusted_identity_context(
 		"创建一个医疗行业线索",
 		email="owner@example.com",
+		user_hint="Administrator",
 		mcp_url="https://manager.myyr.top/api/method/ione_core.mcp.server.handle_mcp",
 		secret=secret,
 	)

@@ -125,6 +125,7 @@ class CodexBridge:
 		user_id: str,
 		conversation_id: str,
 		manager_user_email: str | None = None,
+		manager_user_hint: str | None = None,
 	) -> AsyncIterator[dict[str, Any] | None]:
 		text = latest_user_text(request)
 		if not text:
@@ -132,6 +133,7 @@ class CodexBridge:
 		text = with_trusted_identity_context(
 			text,
 			email=manager_user_email,
+			user_hint=manager_user_hint,
 			mcp_url=self.settings.frappe_mcp_url,
 			secret=self.settings.identity_shared_secret,
 		)
@@ -188,6 +190,7 @@ class CodexBridge:
 		user_id: str,
 		conversation_id: str,
 		manager_user_email: str | None = None,
+		manager_user_hint: str | None = None,
 	) -> dict[str, Any]:
 		parts: list[str] = []
 		completed_messages: list[str] = []
@@ -198,6 +201,7 @@ class CodexBridge:
 			user_id=user_id,
 			conversation_id=conversation_id,
 			manager_user_email=manager_user_email,
+			manager_user_hint=manager_user_hint,
 		):
 			if event is None:
 				continue
@@ -229,6 +233,7 @@ class CodexBridge:
 		user_id: str,
 		conversation_id: str,
 		manager_user_email: str | None = None,
+		manager_user_hint: str | None = None,
 	) -> AsyncIterator[str]:
 		completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 		yield stream_chunk(completion_id, request.model, {"role": "assistant", "content": ""})
@@ -242,6 +247,7 @@ class CodexBridge:
 				user_id=user_id,
 				conversation_id=conversation_id,
 				manager_user_email=manager_user_email,
+				manager_user_hint=manager_user_hint,
 			):
 				if event is None:
 					yield ": keepalive\n\n"

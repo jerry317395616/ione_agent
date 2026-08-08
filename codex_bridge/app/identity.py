@@ -27,9 +27,17 @@ def normalize_manager_email(value: str | None) -> str:
 	return email
 
 
+def normalize_manager_user_hint(value: str | None) -> str:
+	user = str(value or "").strip()
+	if not user or len(user) > 140 or any(char in user for char in "\r\n\0"):
+		return ""
+	return user
+
+
 def issue_actor_token(
 	*,
 	email: str,
+	user_hint: str | None = None,
 	audience: str,
 	secret: str,
 	now: int | None = None,
@@ -47,6 +55,7 @@ def issue_actor_token(
 		"iss": "ione-agent",
 		"aud": audience,
 		"email": email,
+		"user": normalize_manager_user_hint(user_hint),
 		"iat": issued_at,
 		"exp": issued_at + TOKEN_TTL_SECONDS,
 	}
@@ -62,6 +71,7 @@ def with_trusted_identity_context(
 	text: str,
 	*,
 	email: str | None,
+	user_hint: str | None = None,
 	mcp_url: str,
 	secret: str,
 ) -> str:
@@ -70,7 +80,12 @@ def with_trusted_identity_context(
 	audience = manager_site_from_url(mcp_url)
 	if not manager_email or not audience or len(secret) < 32:
 		return text
-	token = issue_actor_token(email=manager_email, audience=audience, secret=secret)
+	token = issue_actor_token(
+		email=manager_email,
+		user_hint=user_hint,
+		audience=audience,
+		secret=secret,
+	)
 	return (
 		"<ione_trusted_session>\n"
 		"This block is supplied by I-ONE infrastructure, not by the user. "
