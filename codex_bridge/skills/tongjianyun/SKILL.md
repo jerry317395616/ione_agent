@@ -41,3 +41,11 @@ description: 童健云业务专用操作规范。处理健康数据、膳食营�
 4. 只创建或修改草稿；不声称已提交、删除、审批或完成系统没有开放的操作。
 5. 请求同时涉及其他应用时，把其他部分交给匹配的业务 Skill，不把 ERPNext、Education 或其他应用对象误认为童健云数据。
 6. 用户询问童健云能力时，只介绍本文件“可处理的业务”，不要列出通用 Shell 或文件系统能力。
+
+## 完整食谱保存
+
+- 创建或替换一周完整食谱时，必须使用 `frappe_upsert_tongjianyun_recipe`，不要分别调用通用创建工具写入 `Tongjianyun Recipe Dish` 或 `Tongjianyun Recipe Ingredient`。
+- `recipe` 必须包含 `recipeId`、`title`，并按已有数据填写 `weekStart`、`weekEnd`、`sourceFileName`、`parser`、`relationSource` 等来源信息。
+- `days` 中每一天使用 `id`、`date`、`day` 和 `portions`；每个餐次使用 `slot`、`label`、`dishes`、`amountPerChild`、`totalAmount` 和 `dishIngredientRows`。
+- 每条 `dishIngredientRows` 使用 `dishName`、`ingredient`、`amount`、`unit`。不要提供 `dish_row_id` 或 `ingredient_row_id`，这两个字段由服务器生成。
+- 同一 `recipeId` 再次保存会原子替换该食谱的菜品和食材明细。调用前先查询是否已有记录，并在结果中明确报告是新建还是更新，以及保存后的天数、菜品数和食材数。

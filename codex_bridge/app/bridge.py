@@ -47,6 +47,7 @@ _TOOL_LABELS = {
 	"frappe_get_document": "读取业务记录",
 	"frappe_create_document": "新增业务记录",
 	"frappe_update_document": "更新业务记录",
+	"frappe_upsert_tongjianyun_recipe": "保存童健云完整食谱",
 	"frappe_list_attachments": "查询业务附件",
 	"frappe_attach_text_file": "保存文本附件",
 	"frappe_attach_word_file": "保存文档附件",

@@ -155,6 +155,10 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert '"frappe_convert_lead_to_deal"' in config
 	assert '"frappe_read_word_attachment"' in config
 	assert '"frappe_upsert_deal_presentation"' in config
+	assert '"frappe_upsert_tongjianyun_recipe"' in config
+	assert "frappe_upsert_tongjianyun_recipe" in (
+		settings.bundled_skills_dir / "tongjianyun" / "SKILL.md"
+	).read_text(encoding="utf-8")
 
 
 def test_prepare_can_limit_skills_and_mcp_tools(monkeypatch, tmp_path) -> None:

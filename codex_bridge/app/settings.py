@@ -18,6 +18,7 @@ DEFAULT_MCP_TOOLS = (
 	"frappe_read_word_attachment",
 	"frappe_create_document",
 	"frappe_update_document",
+	"frappe_upsert_tongjianyun_recipe",
 	"frappe_attach_text_file",
 	"frappe_attach_word_file",
 	"frappe_create_crm_lead_package",
