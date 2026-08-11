@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, latest_user_text, stream_chunk
+from app.dynamic_tools import DynamicToolProxy
 from app.identity import issue_actor_token, with_trusted_identity_context
 from app.public_output import sanitize_public_text
 from app.settings import Settings
@@ -185,6 +186,67 @@ def test_prepare_can_limit_skills_and_mcp_tools(monkeypatch, tmp_path) -> None:
 	assert '"frappe_get_document"' in config
 	assert '"frappe_search_doctypes"' not in config
 	assert '"frappe_create_crm_lead_package"' not in config
+
+
+def test_prepare_can_use_app_server_dynamic_tools(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+	monkeypatch.setenv("IONE_FRAPPE_MCP_URL", "http://127.0.0.1:17080/api/mcp")
+	monkeypatch.setenv("IONE_FRAPPE_AUTH_HEADER", "token key:secret")
+	monkeypatch.setenv("IONE_FRAPPE_DYNAMIC_TOOLS", "1")
+	settings = Settings.from_environment()
+	settings.prepare()
+	config = (settings.codex_home / "config.toml").read_text(encoding="utf-8")
+
+	assert settings.frappe_dynamic_tools is True
+	assert "[mcp_servers.manager]" not in config
+
+
+def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None:
+	settings = SimpleNamespace(
+		frappe_mcp_enabled_tools=("frappe_get_context",),
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_auth_header="token key:secret",
+		frappe_site_host="child.example",
+	)
+	proxy = DynamicToolProxy(settings)
+
+	def fake_rpc(method, params):
+		if method == "tools/list":
+			return {
+				"tools": [
+					{
+						"name": "frappe_get_context",
+						"description": "Get context",
+						"inputSchema": {"type": "object", "properties": {}},
+					},
+					{"name": "frappe_create_document", "inputSchema": {"type": "object"}},
+				]
+			}
+		assert params == {"name": "frappe_get_context", "arguments": {"actor_token": "token"}}
+		return {
+			"content": [{"type": "text", "text": '{"site":"child.example"}'}],
+			"isError": False,
+		}
+
+	monkeypatch.setattr(proxy, "_rpc", fake_rpc)
+
+	async def probe():
+		specs = await proxy.specs()
+		assert [spec["name"] for spec in specs] == ["frappe_get_context"]
+		result = await proxy.call("frappe_get_context", {"actor_token": "token"})
+		assert result["success"] is True
+		assert result["contentItems"][0]["text"] == '{"site":"child.example"}'
+		denied = await proxy.call("frappe_create_document", {})
+		assert denied["success"] is False
+
+	asyncio.run(probe())
 
 
 def test_stream_chunk_is_openai_compatible() -> None:

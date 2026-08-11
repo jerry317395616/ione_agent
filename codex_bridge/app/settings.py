@@ -93,6 +93,7 @@ class Settings:
 	frappe_auth_header: str
 	frappe_site_host: str
 	frappe_mcp_enabled_tools: tuple[str, ...]
+	frappe_dynamic_tools: bool
 	enabled_skills: tuple[str, ...]
 	identity_shared_secret: str
 	identity_audience: str
@@ -145,6 +146,7 @@ class Settings:
 			frappe_auth_header=os.getenv("IONE_FRAPPE_AUTH_HEADER", "").strip(),
 			frappe_site_host=frappe_site_host,
 			frappe_mcp_enabled_tools=csv_values("IONE_FRAPPE_MCP_ENABLED_TOOLS"),
+			frappe_dynamic_tools=as_bool("IONE_FRAPPE_DYNAMIC_TOOLS", False),
 			enabled_skills=csv_values("IONE_CODEX_SKILLS"),
 			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
 			identity_audience=identity_audience,
@@ -222,7 +224,7 @@ request_max_retries = 3
 stream_max_retries = 3
 stream_idle_timeout_ms = 300000
 '''
-		if self.mcp_enabled:
+		if self.mcp_enabled and not self.frappe_dynamic_tools:
 			enabled_tools = self.frappe_mcp_enabled_tools or DEFAULT_MCP_TOOLS
 			if any(not tool.replace("_", "").isalnum() for tool in enabled_tools):
 				raise RuntimeError("IONE_FRAPPE_MCP_ENABLED_TOOLS contains an invalid tool name")

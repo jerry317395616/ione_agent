@@ -535,6 +535,7 @@ def main() -> int:
 			"IONE_FRAPPE_API_SECRET": credentials["api_secret"],
 			"IONE_FRAPPE_AUTH_HEADER": f"token {credentials['api_key']}:{credentials['api_secret']}",
 			"IONE_FRAPPE_MCP_URL": f"https://{site}/api/method/ione_core.mcp.server.handle_mcp",
+			"IONE_FRAPPE_DYNAMIC_TOOLS": "1",
 			"IONE_MANAGER_IDENTITY_SECRET": identity_secret,
 		}
 	)

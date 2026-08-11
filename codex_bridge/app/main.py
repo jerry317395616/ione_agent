@@ -14,7 +14,6 @@ from app.bridge import ChatCompletionRequest, CodexBridge
 from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
 
-
 logger = logging.getLogger(__name__)
 
 settings = Settings.from_environment()
@@ -93,9 +92,9 @@ async def chat_completions(
 	request: ChatCompletionRequest,
 	x_librechat_user_id: str | None = Header(default=None),
 	x_librechat_conversation_id: str | None = Header(default=None),
-	x_ione_manager_user_email: str | None = Header(default=None),
-	x_ione_manager_user_name: str | None = Header(default=None),
-	x_ione_manager_username: str | None = Header(default=None),
+	x_i_one_manager_user_email: str | None = Header(default=None, alias="X-I-ONE-Manager-User-Email"),
+	x_i_one_manager_user_name: str | None = Header(default=None, alias="X-I-ONE-Manager-User-Name"),
+	x_i_one_manager_username: str | None = Header(default=None, alias="X-I-ONE-Manager-Username"),
 ):
 	user_id = (x_librechat_user_id or "librechat-user")[:140]
 	conversation_id = (x_librechat_conversation_id or f"conversation-{uuid.uuid4().hex}")[:180]
@@ -105,8 +104,8 @@ async def chat_completions(
 				request,
 				user_id=user_id,
 				conversation_id=conversation_id,
-				manager_user_email=x_ione_manager_user_email,
-				manager_user_hint=x_ione_manager_user_name or x_ione_manager_username,
+				manager_user_email=x_i_one_manager_user_email,
+				manager_user_hint=x_i_one_manager_user_name or x_i_one_manager_username,
 			),
 			media_type="text/event-stream",
 			headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -116,8 +115,8 @@ async def chat_completions(
 			request,
 			user_id=user_id,
 			conversation_id=conversation_id,
-			manager_user_email=x_ione_manager_user_email,
-			manager_user_hint=x_ione_manager_user_name or x_ione_manager_username,
+			manager_user_email=x_i_one_manager_user_email,
+			manager_user_hint=x_i_one_manager_user_name or x_i_one_manager_username,
 		)
 	except ValueError as exc:
 		raise HTTPException(status_code=422, detail=sanitize_public_text(exc)) from exc

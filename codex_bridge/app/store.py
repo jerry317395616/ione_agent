@@ -62,4 +62,3 @@ class ConversationStore:
 	def close(self) -> None:
 		with self.lock:
 			self.connection.close()
-

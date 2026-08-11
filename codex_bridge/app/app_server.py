@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from app.dynamic_tools import DynamicToolProxy
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ class CodexAppServer:
 		self.subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
 		self.loaded_threads: set[str] = set()
 		self.generation = 0
+		self.dynamic_tool_proxy = (
+			DynamicToolProxy(settings)
+			if getattr(settings, "mcp_enabled", False) and getattr(settings, "frappe_dynamic_tools", False)
+			else None
+		)
 
 	@property
 	def alive(self) -> bool:
@@ -76,7 +82,8 @@ class CodexAppServer:
 						"name": "ione_agent",
 						"title": "I-ONE Agent",
 						"version": "1.0.0",
-					}
+					},
+					"capabilities": {"experimentalApi": True} if self.dynamic_tool_proxy else {},
 				},
 			)
 			await self.notify("initialized", {})
@@ -202,7 +209,15 @@ class CodexAppServer:
 
 	async def _handle_server_request(self, message: dict[str, Any]) -> None:
 		method = str(message.get("method") or "")
-		if method in {
+		if method == "item/tool/call" and self.dynamic_tool_proxy:
+			params = message.get("params") or {}
+			tool = str(params.get("tool") or "")
+			arguments = params.get("arguments") or {}
+			if not isinstance(arguments, dict):
+				result = DynamicToolProxy._failure("业务工具参数格式无效。")
+			else:
+				result = await self.dynamic_tool_proxy.call(tool, arguments)
+		elif method in {
 			"item/commandExecution/requestApproval",
 			"item/fileChange/requestApproval",
 			"execCommandApproval",
@@ -258,6 +273,7 @@ class CodexAppServer:
 		self.loaded_threads.add(thread_id)
 
 	async def start_thread(self, workspace: str) -> str:
+		dynamic_tools = await self.dynamic_tool_proxy.specs() if self.dynamic_tool_proxy else None
 		result = await self.request(
 			"thread/start",
 			{
@@ -268,6 +284,7 @@ class CodexAppServer:
 				"sandbox": self.settings.sandbox,
 				"developerInstructions": self.settings.developer_instructions,
 				"ephemeral": False,
+				"dynamicTools": dynamic_tools,
 			},
 		)
 		thread_id = str((result or {}).get("thread", {}).get("id") or "")
