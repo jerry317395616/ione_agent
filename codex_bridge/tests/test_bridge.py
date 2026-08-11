@@ -150,6 +150,7 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert (settings.codex_home / "skills" / "deal-proposal-to-slides" / "SKILL.md").is_file()
 	assert (settings.codex_home / "skills" / "deal-materials-to-promo-video" / "SKILL.md").is_file()
 	assert '"frappe_list_attachments"' in config
+	assert '"frappe_get_site_catalog"' in config
 	assert '"frappe_attach_word_file"' in config
 	assert '"frappe_create_crm_lead_package"' in config
 	assert '"frappe_convert_lead_to_deal"' in config
@@ -218,6 +219,8 @@ def test_trusted_identity_context_uses_manager_email() -> None:
 	assert text.endswith("创建一个医疗行业线索")
 	assert "<ione_trusted_session>" in text
 	assert "actor_token=ione1." in text
+	assert "Pass actor_token to every configured Frappe tool" in text
+	assert "do not retry without it" in text
 	assert "owner@example.com" not in text
 
 

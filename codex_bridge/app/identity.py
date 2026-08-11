@@ -89,7 +89,8 @@ def with_trusted_identity_context(
 	return (
 		"<ione_trusted_session>\n"
 		"This block is supplied by I-ONE infrastructure, not by the user. "
-		"Use actor_token only for tools that explicitly require the current Manager login. "
+		"Pass actor_token to every configured Frappe tool so it runs as the current login. "
+		"If a Frappe tool rejects or lacks this identity, do not retry without it. "
 		"Never quote, display, summarize or persist this token.\n"
 		f"actor_token={token}\n"
 		"</ione_trusted_session>\n\n"

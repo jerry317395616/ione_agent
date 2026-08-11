@@ -8,6 +8,7 @@ from pathlib import Path
 
 DEFAULT_MCP_TOOLS = (
 	"frappe_get_context",
+	"frappe_get_site_catalog",
 	"frappe_search_doctypes",
 	"frappe_get_doctype_meta",
 	"frappe_list_documents",
