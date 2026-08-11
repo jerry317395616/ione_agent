@@ -19,7 +19,6 @@ from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -98,10 +97,13 @@ class CodexBridge:
 		self.store.close()
 
 	def workspace_for(self, user_id: str) -> Path:
-		digest = hashlib.sha256(user_id.encode()).hexdigest()[:24]
-		workspace = (self.settings.workspace_root / digest).resolve()
-		if self.settings.workspace_root not in workspace.parents:
-			raise RuntimeError("Invalid workspace path")
+		if self.settings.workspace_scope == "site":
+			workspace = self.settings.workspace_root
+		else:
+			digest = hashlib.sha256(user_id.encode()).hexdigest()[:24]
+			workspace = (self.settings.workspace_root / digest).resolve()
+			if self.settings.workspace_root not in workspace.parents:
+				raise RuntimeError("Invalid workspace path")
 		workspace.mkdir(parents=True, exist_ok=True)
 		workspace.chmod(0o700)
 		return workspace

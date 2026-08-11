@@ -78,6 +78,7 @@ class Settings:
 	codex_home: Path
 	data_dir: Path
 	workspace_root: Path
+	workspace_scope: str
 	sandbox: str
 	network_access: bool
 	developer_instructions: str
@@ -98,6 +99,9 @@ class Settings:
 		sandbox = os.getenv("IONE_CODEX_SANDBOX", "workspace-write").strip()
 		if sandbox not in {"read-only", "workspace-write"}:
 			raise RuntimeError("IONE_CODEX_SANDBOX must be read-only or workspace-write")
+		workspace_scope = os.getenv("IONE_CODEX_WORKSPACE_SCOPE", "user").strip().lower()
+		if workspace_scope not in {"site", "user"}:
+			raise RuntimeError("IONE_CODEX_WORKSPACE_SCOPE must be site or user")
 		return cls(
 			bridge_token=required("IONE_CODEX_BRIDGE_TOKEN", "IONE_LIBRECHAT_API_TOKEN"),
 			deepseek_api_key=required("DEEPSEEK_API_KEY"),
@@ -112,6 +116,7 @@ class Settings:
 			codex_home=Path(os.getenv("IONE_CODEX_HOME", "~/.local/share/ione-codex-agent/codex-home")).expanduser().resolve(),
 			data_dir=Path(os.getenv("IONE_CODEX_DATA_DIR", "~/.local/share/ione-codex-agent/data")).expanduser().resolve(),
 			workspace_root=Path(os.getenv("IONE_CODEX_WORKSPACE_ROOT", "~/.local/share/ione-codex-agent/workspaces")).expanduser().resolve(),
+			workspace_scope=workspace_scope,
 			sandbox=sandbox,
 			network_access=as_bool("IONE_CODEX_NETWORK_ACCESS", True),
 			developer_instructions=os.getenv("IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS).strip(),

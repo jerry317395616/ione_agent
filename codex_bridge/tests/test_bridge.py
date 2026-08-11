@@ -64,6 +64,48 @@ def test_model_catalog_has_selected_model(monkeypatch, tmp_path) -> None:
 	assert settings.app_server_message_limit_bytes > 64 * 1024
 
 
+def test_site_workspace_scope_shares_one_directory(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	workspace_root = tmp_path / "workspaces"
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(workspace_root))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_SCOPE", "site")
+
+	settings = Settings.from_environment()
+	bridge = CodexBridge(settings, SimpleNamespace())
+	try:
+		assert bridge.workspace_for("first@example.com") == workspace_root.resolve()
+		assert bridge.workspace_for("second@example.com") == workspace_root.resolve()
+	finally:
+		bridge.close()
+
+
+def test_user_workspace_scope_remains_isolated(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_SCOPE", "user")
+
+	settings = Settings.from_environment()
+	bridge = CodexBridge(settings, SimpleNamespace())
+	try:
+		assert bridge.workspace_for("first@example.com") != bridge.workspace_for(
+			"second@example.com"
+		)
+	finally:
+		bridge.close()
+
+
 def test_model_catalog_supports_configured_local_model(monkeypatch, tmp_path) -> None:
 	bin_path = tmp_path / "codex"
 	bin_path.write_text("", encoding="utf-8")
