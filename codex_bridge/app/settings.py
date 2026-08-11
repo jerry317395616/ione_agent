@@ -48,6 +48,7 @@ class Settings:
 	deepseek_api_base: str
 	model: str
 	model_provider: str
+	model_context_window: int
 	codex_bin: Path
 	codex_home: Path
 	data_dir: Path
@@ -76,6 +77,10 @@ class Settings:
 			deepseek_api_base=base,
 			model=os.getenv("IONE_CODEX_MODEL", "deepseek-v4-flash").strip(),
 			model_provider=os.getenv("IONE_CODEX_MODEL_PROVIDER", "deepseek").strip(),
+			model_context_window=max(
+				32768,
+				min(4_000_000, int(os.getenv("IONE_CODEX_MODEL_CONTEXT_WINDOW", "1000000"))),
+			),
 			codex_bin=Path(required("IONE_CODEX_BIN")).expanduser().resolve(),
 			codex_home=Path(os.getenv("IONE_CODEX_HOME", "~/.local/share/ione-codex-agent/codex-home")).expanduser().resolve(),
 			data_dir=Path(os.getenv("IONE_CODEX_DATA_DIR", "~/.local/share/ione-codex-agent/data")).expanduser().resolve(),
@@ -195,11 +200,20 @@ enabled_tools = [
 
 	def model_catalog(self) -> dict:
 		models = []
-		for priority, slug in enumerate(("deepseek-v4-flash", "deepseek-v4-pro"), start=1):
+		slugs = tuple(dict.fromkeys((self.model, "deepseek-v4-flash", "deepseek-v4-pro")))
+		for priority, slug in enumerate(slugs, start=1):
+			selected = slug == self.model
+			context_window = self.model_context_window if selected else 1_000_000
 			models.append(
 				{
 					"slug": slug,
-					"display_name": "I-ONE AI Advanced" if slug.endswith("pro") else "I-ONE AI Standard",
+					"display_name": (
+						"I-ONE AI Local"
+						if selected and self.model_provider != "deepseek"
+						else "I-ONE AI Advanced"
+						if slug.endswith("pro")
+						else "I-ONE AI Standard"
+					),
 					"description": "I-ONE managed enterprise intelligence model",
 					"default_reasoning_level": "high",
 					"supported_reasoning_levels": [
@@ -224,9 +238,9 @@ enabled_tools = [
 					"web_search_tool_type": "text",
 					"truncation_policy": {"mode": "bytes", "limit": 10000},
 					"supports_parallel_tool_calls": True,
-					"context_window": 1000000,
-					"max_context_window": 1000000,
-					"auto_compact_token_limit": 900000,
+					"context_window": context_window,
+					"max_context_window": context_window,
+					"auto_compact_token_limit": int(context_window * 0.9),
 					"effective_context_window_percent": 90,
 					"experimental_supported_tools": [],
 					"input_modalities": ["text"],
