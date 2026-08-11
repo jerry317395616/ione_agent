@@ -64,6 +64,12 @@ Configure a distinct
 browser passwords or commit credentials. Set `ione_agent_frontend_url` in the Frappe site config to
 the deployed LibreChat URL when the new frontend is ready.
 
+For production installation, use `deploy/install_site_companion.py` instead of granting the Frappe
+container access to the host Docker socket. The installer installs `ione_agent`, obtains the current
+LibreChat fork, creates per-site Compose and bridge services, assigns unique ports and secrets, enables
+both services at boot, and verifies their health. See `deploy/README.md` for the command and isolation
+contract.
+
 ## Production agent controls
 
 - DeepSeek API is the primary LLM for planning, intent parsing, tool selection, evidence analysis and final lead review. The validated state is persisted by LangGraph rather than entrusted to the model.
