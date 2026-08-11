@@ -134,10 +134,23 @@ class ProcessDisplay:
 		default_factory=lambda: defaultdict(list)
 	)
 	seen_summaries: set[str] = field(default_factory=set)
+	activity_labels: list[str] = field(default_factory=list)
 
 	@staticmethod
 	def initial() -> str:
 		return "### 处理过程\n\n- 已收到请求，正在分析。\n"
+
+	def _record_activity(self, label: str) -> None:
+		if label not in self.activity_labels:
+			self.activity_labels.append(label)
+
+	def _fallback_summary(self) -> str:
+		if not self.activity_labels:
+			return "已确认请求目标，并完成必要分析。"
+		activities = "、".join(self.activity_labels[:4])
+		if len(self.activity_labels) > 4:
+			activities += "等步骤"
+		return f"已根据请求完成分析，并执行了{activities}。"
 
 	def consume(self, event: dict[str, Any]) -> list[str]:
 		method = str(event.get("method") or "")
@@ -150,6 +163,7 @@ class ProcessDisplay:
 		if method in {"bridge/dynamicTool/started", "bridge/dynamicTool/completed"}:
 			label = _tool_label(params.get("tool"))
 			if method.endswith("/started"):
+				self._record_activity(label)
 				return [f"- 正在{label}。\n"]
 			status = "完成" if params.get("success", True) else "未成功"
 			return [f"- {label}{status}{_duration_text(params.get('durationMs'))}。\n"]
@@ -159,7 +173,11 @@ class ProcessDisplay:
 		if method == "turn/completed":
 			turn = params.get("turn") or {}
 			if str(turn.get("status") or "completed") == "completed":
-				return ["- 处理完成，正在整理结果。\n"]
+				deltas: list[str] = []
+				if not self.seen_summaries:
+					deltas.append(f"\n**思考摘要**\n\n{self._fallback_summary()}\n\n")
+				deltas.append("- 处理完成，正在整理结果。\n")
+				return deltas
 			return ["- 处理未成功，正在整理错误信息。\n"]
 
 		item = params.get("item") or {}
@@ -179,7 +197,9 @@ class ProcessDisplay:
 		if not label:
 			return []
 		if method == "item/started":
+			self._record_activity(label)
 			return [f"- 正在{label}。\n"]
+		self._record_activity(label)
 		status = str(item.get("status") or "completed")
 		result = "完成" if status == "completed" else "未成功"
 		return [f"- {label}{result}{_duration_text(item.get('durationMs'))}。\n"]

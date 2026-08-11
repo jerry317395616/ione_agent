@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 
 from app.app_server import CodexAppServer
-from app.bridge import ChatCompletionRequest, CodexBridge, latest_user_text, stream_chunk
+from app.bridge import ChatCompletionRequest, CodexBridge, ProcessDisplay, latest_user_text, stream_chunk
 from app.dynamic_tools import DynamicToolProxy
 from app.identity import issue_actor_token, with_trusted_identity_context
 from app.public_output import sanitize_public_text
@@ -575,3 +575,21 @@ def test_dynamic_tool_request_publishes_safe_lifecycle_events() -> None:
 			"result": {"success": True, "contentItems": [{"text": "private-result"}]},
 		}
 	]
+
+
+def test_process_display_builds_fallback_summary_from_actual_activities() -> None:
+	display = ProcessDisplay()
+	started = display.consume(
+		{
+			"method": "bridge/dynamicTool/started",
+			"params": {"tool": "frappe_list_documents"},
+		}
+	)
+	completed = display.consume(
+		{"method": "turn/completed", "params": {"turn": {"status": "completed"}}}
+	)
+	text = "".join([*started, *completed])
+
+	assert "正在查询业务数据" in text
+	assert "思考摘要" in text
+	assert "执行了查询业务数据" in text
