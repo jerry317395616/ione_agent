@@ -130,9 +130,7 @@ def _duration_text(duration_ms: object) -> str:
 class ProcessDisplay:
 	"""Convert app-server lifecycle events into a safe, auditable display."""
 
-	reasoning_buffers: defaultdict[str, list[str]] = field(
-		default_factory=lambda: defaultdict(list)
-	)
+	reasoning_buffers: defaultdict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
 	seen_summaries: set[str] = field(default_factory=set)
 	activity_labels: list[str] = field(default_factory=list)
 
@@ -203,6 +201,84 @@ class ProcessDisplay:
 		status = str(item.get("status") or "completed")
 		result = "完成" if status == "completed" else "未成功"
 		return [f"- {label}{result}{_duration_text(item.get('durationMs'))}。\n"]
+
+
+@dataclass
+class AgentMessageCollector:
+	"""Keep interim commentary separate from the turn's final answer."""
+
+	buffers: dict[str, list[str]] = field(default_factory=dict)
+	item_order: list[str] = field(default_factory=list)
+	phases: dict[str, str] = field(default_factory=dict)
+	final_messages: list[str] = field(default_factory=list)
+	legacy_messages: list[str] = field(default_factory=list)
+	unscoped_deltas: list[str] = field(default_factory=list)
+
+	@staticmethod
+	def _phase(value: object) -> str:
+		return str(value or "").strip().lower().replace("-", "_")
+
+	def _ensure_item(self, item_id: str) -> list[str]:
+		if item_id not in self.buffers:
+			self.buffers[item_id] = []
+			self.item_order.append(item_id)
+		return self.buffers[item_id]
+
+	def consume(self, event: dict[str, Any]) -> None:
+		method = str(event.get("method") or "")
+		params = event.get("params") or {}
+		if method == "item/agentMessage/delta":
+			delta = str(params.get("delta") or "")
+			item_id = str(params.get("itemId") or "").strip()
+			if item_id:
+				self._ensure_item(item_id).append(delta)
+				phase = self._phase(params.get("phase"))
+				if phase:
+					self.phases[item_id] = phase
+			else:
+				self.unscoped_deltas.append(delta)
+			return
+
+		if method not in {"item/started", "item/completed"}:
+			return
+		item = params.get("item") or {}
+		if not isinstance(item, dict) or item.get("type") != "agentMessage":
+			return
+		item_id = str(item.get("id") or params.get("itemId") or "").strip()
+		phase = self._phase(item.get("phase") or params.get("phase"))
+		if method == "item/started":
+			if item_id:
+				self._ensure_item(item_id)
+				if phase:
+					self.phases[item_id] = phase
+			return
+
+		if item_id:
+			phase = phase or self.phases.pop(item_id, "")
+			buffered = "".join(self.buffers.pop(item_id, []))
+		else:
+			buffered = ""
+		text = str(item.get("text") or buffered).strip()
+		if not text:
+			return
+		if phase in {"final", "final_answer", "finalanswer"}:
+			self.final_messages.append(text)
+		elif phase not in {"commentary", "analysis"}:
+			# Older app-server versions did not expose phase. The last completed
+			# message remains the safest backward-compatible final-answer fallback.
+			self.legacy_messages.append(text)
+
+	def answer(self) -> str:
+		if self.final_messages:
+			return self.final_messages[-1].strip()
+		if self.legacy_messages:
+			return self.legacy_messages[-1].strip()
+		# A delta-only legacy stream cannot expose phases. Return only the last
+		# scoped message instead of concatenating every assistant message.
+		for item_id in reversed(self.item_order):
+			if text := "".join(self.buffers.get(item_id, [])).strip():
+				return text
+		return "".join(self.unscoped_deltas).strip()
 
 
 class ChatMessage(BaseModel):
@@ -378,8 +454,7 @@ class CodexBridge:
 		manager_user_email: str | None = None,
 		manager_user_hint: str | None = None,
 	) -> dict[str, Any]:
-		parts: list[str] = []
-		completed_messages: list[str] = []
+		messages = AgentMessageCollector()
 		status = "completed"
 		error = ""
 		async for event in self._events(
@@ -393,19 +468,14 @@ class CodexBridge:
 				continue
 			method = event.get("method")
 			params = event.get("params") or {}
-			if method == "item/agentMessage/delta":
-				parts.append(str(params.get("delta") or ""))
-			elif method == "item/completed":
-				item = params.get("item") or {}
-				if item.get("type") == "agentMessage" and item.get("text"):
-					completed_messages.append(str(item["text"]))
-			elif method == "error" and not params.get("willRetry", False):
+			messages.consume(event)
+			if method == "error" and not params.get("willRetry", False):
 				error = str((params.get("error") or {}).get("message") or "")
 			elif method == "turn/completed":
 				turn = params.get("turn") or {}
 				status = str(turn.get("status") or status)
 				error = error or str((turn.get("error") or {}).get("message") or "")
-		answer = "".join(parts).strip() or (completed_messages[-1].strip() if completed_messages else "")
+		answer = messages.answer()
 		if status != "completed":
 			raise AppServerError(error or f"Codex turn ended with status {status}")
 		if not answer:
@@ -429,8 +499,7 @@ class CodexBridge:
 			request.model,
 			{"reasoning_content": process_display.initial()},
 		)
-		parts: list[str] = []
-		completed_messages: list[str] = []
+		messages = AgentMessageCollector()
 		status = "completed"
 		error = ""
 		try:
@@ -452,15 +521,8 @@ class CodexBridge:
 						request.model,
 						{"reasoning_content": process_delta},
 					)
-				if method == "item/agentMessage/delta" and (
-					delta := str(params.get("delta") or "")
-				):
-					parts.append(delta)
-				elif method == "item/completed":
-					item = params.get("item") or {}
-					if item.get("type") == "agentMessage" and item.get("text"):
-						completed_messages.append(str(item["text"]))
-				elif method == "error" and not params.get("willRetry", False):
+				messages.consume(event)
+				if method == "error" and not params.get("willRetry", False):
 					error = str((params.get("error") or {}).get("message") or "")
 				elif method == "turn/completed":
 					turn = params.get("turn") or {}
@@ -471,7 +533,7 @@ class CodexBridge:
 		except Exception as exc:
 			status = "failed"
 			error = str(exc)
-		answer = "".join(parts).strip() or (completed_messages[-1].strip() if completed_messages else "")
+		answer = messages.answer()
 		if status != "completed":
 			reference = uuid.uuid4().hex[:10].upper()
 			logger.error(

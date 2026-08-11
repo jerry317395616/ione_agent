@@ -100,9 +100,7 @@ def test_user_workspace_scope_remains_isolated(monkeypatch, tmp_path) -> None:
 	settings = Settings.from_environment()
 	bridge = CodexBridge(settings, SimpleNamespace())
 	try:
-		assert bridge.workspace_for("first@example.com") != bridge.workspace_for(
-			"second@example.com"
-		)
+		assert bridge.workspace_for("first@example.com") != bridge.workspace_for("second@example.com")
 	finally:
 		bridge.close()
 
@@ -363,14 +361,9 @@ def test_stream_reports_app_server_failure() -> None:
 	async def collect() -> list[str]:
 		bridge = object.__new__(FailingBridge)
 		bridge.stream = CodexBridge.stream.__get__(bridge, FailingBridge)
-		request = ChatCompletionRequest(
-			messages=[{"role": "user", "content": "你好"}], stream=True
-		)
+		request = ChatCompletionRequest(messages=[{"role": "user", "content": "你好"}], stream=True)
 		return [
-			chunk
-			async for chunk in bridge.stream(
-				request, user_id="user", conversation_id="conversation"
-			)
+			chunk async for chunk in bridge.stream(request, user_id="user", conversation_id="conversation")
 		]
 
 	chunks = asyncio.run(collect())
@@ -398,6 +391,102 @@ def test_public_output_hides_runtime_and_provider_details() -> None:
 	)
 
 
+class PhasedAgentMessageBridge:
+	async def _events(self, *args, **kwargs):
+		yield {
+			"method": "item/started",
+			"params": {
+				"item": {
+					"id": "commentary-1",
+					"type": "agentMessage",
+					"phase": "commentary",
+				}
+			},
+		}
+		yield {
+			"method": "item/agentMessage/delta",
+			"params": {"itemId": "commentary-1", "delta": "先检查食谱记录。"},
+		}
+		yield {
+			"method": "item/completed",
+			"params": {
+				"item": {
+					"id": "commentary-1",
+					"type": "agentMessage",
+					"phase": "commentary",
+					"text": "先检查食谱记录。",
+				}
+			},
+		}
+		yield {
+			"method": "bridge/dynamicTool/started",
+			"params": {"tool": "frappe_get_document"},
+		}
+		yield {
+			"method": "bridge/dynamicTool/completed",
+			"params": {"tool": "frappe_get_document", "success": True},
+		}
+		yield {
+			"method": "item/started",
+			"params": {
+				"item": {
+					"id": "answer-1",
+					"type": "agentMessage",
+					"phase": "final_answer",
+				}
+			},
+		}
+		yield {
+			"method": "item/agentMessage/delta",
+			"params": {"itemId": "answer-1", "delta": "食谱已成功上传。"},
+		}
+		yield {
+			"method": "item/completed",
+			"params": {
+				"item": {
+					"id": "answer-1",
+					"type": "agentMessage",
+					"phase": "final_answer",
+					"text": "食谱已成功上传。",
+				}
+			},
+		}
+		yield {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}
+
+
+def test_stream_keeps_commentary_out_of_final_content() -> None:
+	async def collect() -> list[str]:
+		bridge = object.__new__(PhasedAgentMessageBridge)
+		bridge.stream = CodexBridge.stream.__get__(bridge, PhasedAgentMessageBridge)
+		request = ChatCompletionRequest(messages=[{"role": "user", "content": "上传食谱"}], stream=True)
+		return [
+			chunk async for chunk in bridge.stream(request, user_id="user", conversation_id="conversation")
+		]
+
+	deltas = []
+	for chunk in asyncio.run(collect()):
+		if chunk.startswith("data: {"):
+			payload = json.loads(chunk.removeprefix("data: ").strip())
+			deltas.append(payload["choices"][0]["delta"])
+	content = "".join(delta.get("content", "") for delta in deltas)
+	reasoning = "".join(delta.get("reasoning_content", "") for delta in deltas)
+
+	assert content == "食谱已成功上传。"
+	assert "先检查食谱记录" not in content
+	assert "读取业务记录" in reasoning
+
+
+def test_non_stream_completion_returns_only_final_answer() -> None:
+	async def collect() -> dict:
+		bridge = object.__new__(PhasedAgentMessageBridge)
+		bridge.complete = CodexBridge.complete.__get__(bridge, PhasedAgentMessageBridge)
+		request = ChatCompletionRequest(messages=[{"role": "user", "content": "上传食谱"}])
+		return await bridge.complete(request, user_id="user", conversation_id="conversation")
+
+	response = asyncio.run(collect())
+	assert response["choices"][0]["message"]["content"] == "食谱已成功上传。"
+
+
 class SensitiveAnswerBridge:
 	async def _events(self, *args, **kwargs):
 		yield {"method": "item/agentMessage/delta", "params": {"delta": "Codex App "}}
@@ -414,12 +503,7 @@ def test_stream_sanitizes_sensitive_answer_across_deltas() -> None:
 		bridge.stream = CodexBridge.stream.__get__(bridge, SensitiveAnswerBridge)
 		request = ChatCompletionRequest(messages=[{"role": "user", "content": "介绍你自己"}], stream=True)
 		return "".join(
-			[
-				chunk
-				async for chunk in bridge.stream(
-					request, user_id="user", conversation_id="conversation"
-				)
-			]
+			[chunk async for chunk in bridge.stream(request, user_id="user", conversation_id="conversation")]
 		)
 
 	chunks = asyncio.run(collect())
@@ -495,10 +579,7 @@ def test_stream_exposes_safe_dynamic_process_and_summary() -> None:
 		bridge.stream = CodexBridge.stream.__get__(bridge, ProcessDisplayBridge)
 		request = ChatCompletionRequest(messages=[{"role": "user", "content": "查询数据"}], stream=True)
 		return [
-			chunk
-			async for chunk in bridge.stream(
-				request, user_id="user", conversation_id="conversation"
-			)
+			chunk async for chunk in bridge.stream(request, user_id="user", conversation_id="conversation")
 		]
 
 	chunks = asyncio.run(collect())
@@ -585,9 +666,7 @@ def test_process_display_builds_fallback_summary_from_actual_activities() -> Non
 			"params": {"tool": "frappe_list_documents"},
 		}
 	)
-	completed = display.consume(
-		{"method": "turn/completed", "params": {"turn": {"status": "completed"}}}
-	)
+	completed = display.consume({"method": "turn/completed", "params": {"turn": {"status": "completed"}}})
 	text = "".join([*started, *completed])
 
 	assert "正在查询业务数据" in text
