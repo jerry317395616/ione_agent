@@ -311,6 +311,8 @@ endpoints:
       models:
         default: ['ione-agent']
         fetch: true
+      customParams:
+        reasoningKey: 'reasoning_content'
       titleConvo: false
       summarize: false
       modelDisplayLabel: 'I-ONE Agent'

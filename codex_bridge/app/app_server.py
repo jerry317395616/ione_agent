@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections import defaultdict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -213,10 +214,28 @@ class CodexAppServer:
 			params = message.get("params") or {}
 			tool = str(params.get("tool") or "")
 			arguments = params.get("arguments") or {}
+			started_at = time.monotonic()
+			public_params = {
+				"threadId": params.get("threadId"),
+				"turnId": params.get("turnId"),
+				"callId": params.get("callId") or params.get("itemId") or str(message["id"]),
+				"tool": tool,
+			}
+			await self._publish({"method": "bridge/dynamicTool/started", "params": public_params})
 			if not isinstance(arguments, dict):
 				result = DynamicToolProxy._failure("业务工具参数格式无效。")
 			else:
 				result = await self.dynamic_tool_proxy.call(tool, arguments)
+			await self._publish(
+				{
+					"method": "bridge/dynamicTool/completed",
+					"params": {
+						**public_params,
+						"success": result.get("success") is True,
+						"durationMs": round((time.monotonic() - started_at) * 1000),
+					},
+				}
+			)
 		elif method in {
 			"item/commandExecution/requestApproval",
 			"item/fileChange/requestApproval",

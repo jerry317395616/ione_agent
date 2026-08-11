@@ -426,3 +426,152 @@ def test_stream_sanitizes_sensitive_answer_across_deltas() -> None:
 	assert "Codex" not in chunks
 	assert "DeepSeek" not in chunks
 	assert "I-ONE" in chunks
+
+
+class ProcessDisplayBridge:
+	async def _events(self, *args, **kwargs):
+		yield {
+			"method": "item/reasoning/summaryTextDelta",
+			"params": {
+				"itemId": "reasoning-1",
+				"delta": "先确认业务对象，再查询数据。token=top-secret ",
+			},
+		}
+		yield {
+			"method": "item/reasoning/summaryTextDelta",
+			"params": {"itemId": "reasoning-1", "delta": "路径 /home/zyd/private.txt"},
+		}
+		yield {
+			"method": "item/completed",
+			"params": {"item": {"id": "reasoning-1", "type": "reasoning"}},
+		}
+		yield {
+			"method": "bridge/dynamicTool/started",
+			"params": {
+				"callId": "call-1",
+				"tool": "frappe_list_documents",
+				"arguments": {"password": "must-not-leak"},
+			},
+		}
+		yield {
+			"method": "bridge/dynamicTool/completed",
+			"params": {
+				"callId": "call-1",
+				"tool": "frappe_list_documents",
+				"success": True,
+				"durationMs": 1250,
+				"result": {"secret": "must-not-leak"},
+			},
+		}
+		yield {
+			"method": "item/started",
+			"params": {
+				"item": {
+					"id": "command-1",
+					"type": "commandExecution",
+					"command": "curl -H 'Authorization: Bearer must-not-leak'",
+				}
+			},
+		}
+		yield {
+			"method": "item/completed",
+			"params": {
+				"item": {
+					"id": "command-1",
+					"type": "commandExecution",
+					"status": "completed",
+					"durationMs": 250,
+					"aggregatedOutput": "must-not-leak",
+				}
+			},
+		}
+		yield {"method": "item/agentMessage/delta", "params": {"delta": "处理完成。"}}
+		yield {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}
+
+
+def test_stream_exposes_safe_dynamic_process_and_summary() -> None:
+	async def collect() -> list[str]:
+		bridge = object.__new__(ProcessDisplayBridge)
+		bridge.stream = CodexBridge.stream.__get__(bridge, ProcessDisplayBridge)
+		request = ChatCompletionRequest(messages=[{"role": "user", "content": "查询数据"}], stream=True)
+		return [
+			chunk
+			async for chunk in bridge.stream(
+				request, user_id="user", conversation_id="conversation"
+			)
+		]
+
+	chunks = asyncio.run(collect())
+	deltas = []
+	for chunk in chunks:
+		if not chunk.startswith("data: {"):
+			continue
+		payload = json.loads(chunk.removeprefix("data: ").strip())
+		deltas.append(payload["choices"][0]["delta"])
+	reasoning = "".join(delta.get("reasoning_content", "") for delta in deltas)
+	content = "".join(delta.get("content", "") for delta in deltas)
+
+	assert "处理过程" in reasoning
+	assert "思考摘要" in reasoning
+	assert "先确认业务对象，再查询数据" in reasoning
+	assert "查询业务数据" in reasoning
+	assert "1.2 秒" in reasoning
+	assert "执行受控系统操作" in reasoning
+	assert "处理完成，正在整理结果" in reasoning
+	assert "处理完成。" in content
+	assert "must-not-leak" not in reasoning
+	assert "top-secret" not in reasoning
+	assert "/home/zyd" not in reasoning
+
+
+def test_dynamic_tool_request_publishes_safe_lifecycle_events() -> None:
+	class FakeProxy:
+		async def call(self, tool, arguments):
+			assert tool == "frappe_get_document"
+			assert arguments == {"name": "secret-record"}
+			return {"success": True, "contentItems": [{"text": "private-result"}]}
+
+	async def probe() -> tuple[list[dict], list[dict]]:
+		server = object.__new__(CodexAppServer)
+		server.dynamic_tool_proxy = FakeProxy()
+		published: list[dict] = []
+		written: list[dict] = []
+
+		async def publish(payload):
+			published.append(payload)
+
+		async def write(payload):
+			written.append(payload)
+
+		server._publish = publish
+		server._write = write
+		await server._handle_server_request(
+			{
+				"id": 7,
+				"method": "item/tool/call",
+				"params": {
+					"threadId": "thread-1",
+					"turnId": "turn-1",
+					"callId": "call-1",
+					"tool": "frappe_get_document",
+					"arguments": {"name": "secret-record"},
+				},
+			}
+		)
+		return published, written
+
+	published, written = asyncio.run(probe())
+	assert [event["method"] for event in published] == [
+		"bridge/dynamicTool/started",
+		"bridge/dynamicTool/completed",
+	]
+	serialized_events = json.dumps(published, ensure_ascii=False)
+	assert "frappe_get_document" in serialized_events
+	assert "secret-record" not in serialized_events
+	assert "private-result" not in serialized_events
+	assert written == [
+		{
+			"id": 7,
+			"result": {"success": True, "contentItems": [{"text": "private-result"}]},
+		}
+	]
