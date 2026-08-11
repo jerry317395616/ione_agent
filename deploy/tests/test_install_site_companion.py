@@ -39,6 +39,21 @@ def test_env_round_trip(tmp_path: Path) -> None:
 	assert installer.parse_env(path) == {"PORT": "1234", "TOKEN": "abc"}
 
 
+def test_existing_site_model_settings_override_host_defaults() -> None:
+	base = {
+		"DEEPSEEK_API_BASE": "https://api.example.com",
+		"IONE_CODEX_MODEL": "remote-model",
+		"IONE_CODEX_MODEL_PROVIDER": "remote",
+	}
+	existing = {
+		"DEEPSEEK_API_BASE": "http://10.144.133.1:1234",
+		"IONE_CODEX_MODEL": "qwen3.6-35b-a3b-fp8",
+		"IONE_CODEX_MODEL_PROVIDER": "qwen-local",
+	}
+
+	assert installer.common_bridge_env(base, existing) == existing
+
+
 def test_parse_credentials_uses_last_payload() -> None:
 	output = 'setup output\n{"user":"agent@example.com","api_key":"key","api_secret":"secret"}\n'
 	assert installer.parse_credentials(output) == {

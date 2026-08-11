@@ -92,6 +92,17 @@ def env_text(values: dict[str, str]) -> str:
 	return "\n".join(lines) + "\n"
 
 
+def common_bridge_env(base: dict[str, str], existing: dict[str, str]) -> dict[str, str]:
+	"""Keep a site's explicit model settings when an installation is repeated."""
+
+	values: dict[str, str] = {}
+	for name in COMMON_BRIDGE_ENV:
+		value = existing.get(name) or base.get(name)
+		if value:
+			values[name] = value
+	return values
+
+
 def atomic_write(path: Path, content: str, mode: int) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
@@ -451,8 +462,8 @@ def main() -> int:
 	sso_secret = existing_librechat_env.get("IONE_SSO_SHARED_SECRET") or secrets.token_hex(32)
 	identity_secret = existing_librechat_env.get("IONE_IDENTITY_SHARED_SECRET") or secrets.token_hex(32)
 
-	if bridge_env_path.is_file():
-		bridge_env_existing = parse_env(bridge_env_path)
+	bridge_env_existing = parse_env(bridge_env_path) if bridge_env_path.is_file() else {}
+	if bridge_env_existing:
 		credentials = {
 			"api_key": bridge_env_existing.get("IONE_FRAPPE_API_KEY", ""),
 			"api_secret": bridge_env_existing.get("IONE_FRAPPE_API_SECRET", ""),
@@ -511,7 +522,7 @@ def main() -> int:
 	run(["chown", "-R", f"{args.run_user}:{args.run_user}", str(instance)])
 
 	base_env = parse_env(args.base_bridge_env)
-	bridge_env = {name: base_env[name] for name in COMMON_BRIDGE_ENV if base_env.get(name)}
+	bridge_env = common_bridge_env(base_env, bridge_env_existing)
 	bridge_env.update(
 		{
 			"IONE_CODEX_BRIDGE_TOKEN": bridge_token,
