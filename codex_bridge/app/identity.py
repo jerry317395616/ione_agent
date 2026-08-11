@@ -74,16 +74,17 @@ def with_trusted_identity_context(
 	user_hint: str | None = None,
 	mcp_url: str,
 	secret: str,
+	audience: str | None = None,
 ) -> str:
 	"""Add an authenticated tool-only identity token without changing the user's request."""
 	manager_email = normalize_manager_email(email)
-	audience = manager_site_from_url(mcp_url)
-	if not manager_email or not audience or len(secret) < 32:
+	target_audience = str(audience or "").strip().lower() or manager_site_from_url(mcp_url)
+	if not manager_email or not target_audience or len(secret) < 32:
 		return text
 	token = issue_actor_token(
 		email=manager_email,
 		user_hint=user_hint,
-		audience=audience,
+		audience=target_audience,
 		secret=secret,
 	)
 	return (

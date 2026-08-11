@@ -138,6 +138,7 @@ class CodexBridge:
 			user_hint=manager_user_hint,
 			mcp_url=self.settings.frappe_mcp_url,
 			secret=self.settings.identity_shared_secret,
+			audience=self.settings.identity_audience,
 		)
 		lock_key = f"{user_id}\0{conversation_id}"
 		async with self.locks[lock_key]:

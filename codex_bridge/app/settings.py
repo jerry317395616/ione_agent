@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,8 @@ the saved document and report its exact DocType and name. Never imply that a doc
 deleted or approved because those operations are intentionally unavailable.
 """
 
+HTTP_HOST_PATTERN = re.compile(r"^[A-Za-z0-9.-]+(?::[0-9]{1,5})?$")
+
 
 def required(*names: str) -> str:
 	for name in names:
@@ -88,9 +91,11 @@ class Settings:
 	keepalive_seconds: int
 	frappe_mcp_url: str
 	frappe_auth_header: str
+	frappe_site_host: str
 	frappe_mcp_enabled_tools: tuple[str, ...]
 	enabled_skills: tuple[str, ...]
 	identity_shared_secret: str
+	identity_audience: str
 
 	@classmethod
 	def from_environment(cls) -> Settings:
@@ -103,6 +108,12 @@ class Settings:
 		workspace_scope = os.getenv("IONE_CODEX_WORKSPACE_SCOPE", "user").strip().lower()
 		if workspace_scope not in {"site", "user"}:
 			raise RuntimeError("IONE_CODEX_WORKSPACE_SCOPE must be site or user")
+		frappe_site_host = os.getenv("IONE_FRAPPE_SITE_HOST", "").strip()
+		if frappe_site_host and not HTTP_HOST_PATTERN.fullmatch(frappe_site_host):
+			raise RuntimeError("IONE_FRAPPE_SITE_HOST is invalid")
+		identity_audience = os.getenv("IONE_MANAGER_IDENTITY_AUDIENCE", "").strip().lower()
+		if identity_audience and not HTTP_HOST_PATTERN.fullmatch(identity_audience):
+			raise RuntimeError("IONE_MANAGER_IDENTITY_AUDIENCE is invalid")
 		return cls(
 			bridge_token=required("IONE_CODEX_BRIDGE_TOKEN", "IONE_LIBRECHAT_API_TOKEN"),
 			deepseek_api_key=required("DEEPSEEK_API_KEY"),
@@ -132,9 +143,11 @@ class Settings:
 			keepalive_seconds=max(5, min(60, int(os.getenv("IONE_CODEX_KEEPALIVE_SECONDS", "10")))),
 			frappe_mcp_url=os.getenv("IONE_FRAPPE_MCP_URL", "").strip(),
 			frappe_auth_header=os.getenv("IONE_FRAPPE_AUTH_HEADER", "").strip(),
+			frappe_site_host=frappe_site_host,
 			frappe_mcp_enabled_tools=csv_values("IONE_FRAPPE_MCP_ENABLED_TOOLS"),
 			enabled_skills=csv_values("IONE_CODEX_SKILLS"),
 			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
+			identity_audience=identity_audience,
 		)
 
 	@property
@@ -214,11 +227,15 @@ stream_idle_timeout_ms = 300000
 			if any(not tool.replace("_", "").isalnum() for tool in enabled_tools):
 				raise RuntimeError("IONE_FRAPPE_MCP_ENABLED_TOOLS contains an invalid tool name")
 			enabled_tools_toml = "\n".join(f"  {json.dumps(tool)}," for tool in enabled_tools)
+			env_headers = ['Authorization = "IONE_FRAPPE_AUTH_HEADER"']
+			if self.frappe_site_host:
+				env_headers.append('Host = "IONE_FRAPPE_SITE_HOST"')
+			env_headers_toml = ", ".join(env_headers)
 			config += f'''
 
 [mcp_servers.manager]
 url = {json.dumps(self.frappe_mcp_url)}
-env_http_headers = {{ Authorization = "IONE_FRAPPE_AUTH_HEADER" }}
+env_http_headers = {{ {env_headers_toml} }}
 enabled = true
 required = true
 startup_timeout_sec = 20
@@ -295,4 +312,6 @@ enabled_tools = [
 		)
 		if self.frappe_auth_header:
 			environment["IONE_FRAPPE_AUTH_HEADER"] = self.frappe_auth_header
+		if self.frappe_site_host:
+			environment["IONE_FRAPPE_SITE_HOST"] = self.frappe_site_host
 		return environment

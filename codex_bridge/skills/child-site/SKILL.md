@@ -9,8 +9,8 @@ description: child 站点全局业务协调规范。用于识别已安装应用�
 
 ## 开始方式
 
-1. 对跨应用请求或不熟悉的业务，先调用 `frappe_get_context` 和 `frappe_get_site_catalog`，确认已安装应用、当前用户、可读对象及创建/修改能力。
-2. 根据目录选择匹配的业务 Skill；名称不明确时使用 `frappe_search_doctypes` 搜索，再读取元数据。
+1. 对跨应用请求或不熟悉的业务，先调用 `frappe_get_context`；调用不带 `app` 和 `query` 的 `frappe_get_site_catalog` 获取紧凑应用摘要。
+2. 选定应用后，再用带 `app` 的 `frappe_get_site_catalog` 查看该应用的可读对象及创建/修改能力；名称不明确时使用 `frappe_search_doctypes` 搜索。
 3. 写入前必须调用 `frappe_get_doctype_meta`，确认字段、必填项、关联关系和当前用户权限。
 4. 创建前用稳定业务键查询，避免重复；创建或修改后回读，并报告准确的 DocType、记录编号和仍需人工处理的事项。
 
@@ -30,4 +30,3 @@ description: child 站点全局业务协调规范。用于识别已安装应用�
 - 童健云健康、膳食、就餐、食品安全：加载 `tongjianyun`。
 - 待办、日程、备注等普通协作：加载 `frappe-business`。
 - I-ONE 业务目标、智能记录、证据、成长与评价：加载 `ione-business`。
-

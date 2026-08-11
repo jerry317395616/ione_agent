@@ -236,6 +236,44 @@ def test_trusted_identity_context_ignores_invalid_email() -> None:
 	)
 
 
+def test_trusted_identity_context_supports_internal_mcp_route() -> None:
+	secret = "identity-secret-longer-than-thirty-two-characters"
+	text = with_trusted_identity_context(
+		"hello",
+		email="owner@example.com",
+		user_hint="Administrator",
+		mcp_url="http://127.0.0.1:17080/api/mcp",
+		secret=secret,
+		audience="child.example",
+	)
+	token = text.split("actor_token=", 1)[1].splitlines()[0]
+	payload_segment = token.split(".")[1]
+	payload = json.loads(base64.urlsafe_b64decode(payload_segment + "=" * (-len(payload_segment) % 4)))
+	assert payload["aud"] == "child.example"
+
+
+def test_prepare_can_route_mcp_internally_with_site_host(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+	monkeypatch.setenv("IONE_FRAPPE_MCP_URL", "http://127.0.0.1:17080/api/mcp")
+	monkeypatch.setenv("IONE_FRAPPE_AUTH_HEADER", "token key:secret")
+	monkeypatch.setenv("IONE_FRAPPE_SITE_HOST", "child.example")
+	monkeypatch.setenv("IONE_MANAGER_IDENTITY_AUDIENCE", "child.example")
+	settings = Settings.from_environment()
+	settings.prepare()
+	config = (settings.codex_home / "config.toml").read_text(encoding="utf-8")
+	assert settings.identity_audience == "child.example"
+	assert 'url = "http://127.0.0.1:17080/api/mcp"' in config
+	assert 'Host = "IONE_FRAPPE_SITE_HOST"' in config
+	assert settings.process_environment()["IONE_FRAPPE_SITE_HOST"] == "child.example"
+
+
 def test_app_server_health_requires_live_output_reader() -> None:
 	async def probe() -> None:
 		server = CodexAppServer(SimpleNamespace())
