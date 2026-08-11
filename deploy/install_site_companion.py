@@ -331,7 +331,7 @@ modelSpecs:
 fileConfig:
   endpoints:
     default:
-      disabled: true
+      disabled: false
 """
 
 

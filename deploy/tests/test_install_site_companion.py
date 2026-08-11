@@ -85,4 +85,6 @@ def test_librechat_service_restarts_with_bridge() -> None:
 def test_librechat_config_targets_site_bridge() -> None:
 	config = installer.librechat_config(18100)
 	assert "http://10.144.133.1:18100/v1" in config
+	assert "disabled: false" in config
+	assert "disabled: true" not in config
 	assert "你好，我是 I-ONE Agent" in config
