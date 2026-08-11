@@ -6,6 +6,27 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+DEFAULT_MCP_TOOLS = (
+	"frappe_get_context",
+	"frappe_search_doctypes",
+	"frappe_get_doctype_meta",
+	"frappe_list_documents",
+	"frappe_get_document",
+	"frappe_list_attachments",
+	"frappe_read_word_attachment",
+	"frappe_create_document",
+	"frappe_update_document",
+	"frappe_attach_text_file",
+	"frappe_attach_word_file",
+	"frappe_create_crm_lead_package",
+	"frappe_convert_lead_to_deal",
+	"frappe_upsert_deal_presentation",
+	"frappe_get_deal_video_sources",
+	"frappe_upsert_deal_video",
+	"frappe_submit_deal_video_render",
+	"frappe_get_deal_video_render_status",
+)
+
 DEFAULT_INSTRUCTIONS = """You are I-ONE Agent, the managed enterprise assistant provided by I-ONE AI.
 Reply in Simplified Chinese by default unless the user requests another language.
 For greetings, casual conversation, explanations, and questions, answer directly without using tools.
@@ -41,6 +62,10 @@ def as_bool(name: str, default: bool) -> bool:
 	return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def csv_values(name: str) -> tuple[str, ...]:
+	return tuple(dict.fromkeys(value.strip() for value in os.getenv(name, "").split(",") if value.strip()))
+
+
 @dataclass(frozen=True)
 class Settings:
 	bridge_token: str
@@ -61,6 +86,8 @@ class Settings:
 	keepalive_seconds: int
 	frappe_mcp_url: str
 	frappe_auth_header: str
+	frappe_mcp_enabled_tools: tuple[str, ...]
+	enabled_skills: tuple[str, ...]
 	identity_shared_secret: str
 
 	@classmethod
@@ -99,6 +126,8 @@ class Settings:
 			keepalive_seconds=max(5, min(60, int(os.getenv("IONE_CODEX_KEEPALIVE_SECONDS", "10")))),
 			frappe_mcp_url=os.getenv("IONE_FRAPPE_MCP_URL", "").strip(),
 			frappe_auth_header=os.getenv("IONE_FRAPPE_AUTH_HEADER", "").strip(),
+			frappe_mcp_enabled_tools=csv_values("IONE_FRAPPE_MCP_ENABLED_TOOLS"),
+			enabled_skills=csv_values("IONE_CODEX_SKILLS"),
 			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
 		)
 
@@ -116,10 +145,22 @@ class Settings:
 		for path in (self.codex_home, self.data_dir, self.workspace_root):
 			path.mkdir(parents=True, exist_ok=True)
 			path.chmod(0o700)
-		if self.bundled_skills_dir.is_dir():
+		target_skills_dir = self.codex_home / "skills"
+		if self.enabled_skills:
+			if target_skills_dir.exists():
+				shutil.rmtree(target_skills_dir)
+			target_skills_dir.mkdir(parents=True, exist_ok=True)
+			for skill_name in self.enabled_skills:
+				if Path(skill_name).name != skill_name:
+					raise RuntimeError(f"Invalid bundled Skill name: {skill_name}")
+				source = self.bundled_skills_dir / skill_name
+				if not (source / "SKILL.md").is_file():
+					raise RuntimeError(f"Bundled Skill not found: {skill_name}")
+				shutil.copytree(source, target_skills_dir / skill_name)
+		elif self.bundled_skills_dir.is_dir():
 			shutil.copytree(
 				self.bundled_skills_dir,
-				self.codex_home / "skills",
+				target_skills_dir,
 				dirs_exist_ok=True,
 			)
 		catalog_path = self.codex_home / "models.json"
@@ -163,6 +204,10 @@ stream_max_retries = 3
 stream_idle_timeout_ms = 300000
 '''
 		if self.mcp_enabled:
+			enabled_tools = self.frappe_mcp_enabled_tools or DEFAULT_MCP_TOOLS
+			if any(not tool.replace("_", "").isalnum() for tool in enabled_tools):
+				raise RuntimeError("IONE_FRAPPE_MCP_ENABLED_TOOLS contains an invalid tool name")
+			enabled_tools_toml = "\n".join(f"  {json.dumps(tool)}," for tool in enabled_tools)
 			config += f'''
 
 [mcp_servers.manager]
@@ -174,24 +219,7 @@ startup_timeout_sec = 20
 tool_timeout_sec = 60
 default_tools_approval_mode = "auto"
 enabled_tools = [
-  "frappe_get_context",
-  "frappe_search_doctypes",
-  "frappe_get_doctype_meta",
-  "frappe_list_documents",
-  "frappe_get_document",
-  "frappe_list_attachments",
-  "frappe_read_word_attachment",
-  "frappe_create_document",
-  "frappe_update_document",
-  "frappe_attach_text_file",
-  "frappe_attach_word_file",
-  "frappe_create_crm_lead_package",
-  "frappe_convert_lead_to_deal",
-  "frappe_upsert_deal_presentation",
-  "frappe_get_deal_video_sources",
-  "frappe_upsert_deal_video",
-  "frappe_submit_deal_video_render",
-  "frappe_get_deal_video_render_status",
+{enabled_tools_toml}
 ]
 '''
 		config_path = self.codex_home / "config.toml"
@@ -226,7 +254,7 @@ enabled_tools = [
 					"priority": 100 - priority,
 					"availability_nux": None,
 					"upgrade": None,
-					"base_instructions": DEFAULT_INSTRUCTIONS,
+					"base_instructions": self.developer_instructions,
 					"include_skills_usage_instructions": True,
 					"include_plugin_usage_instructions": False,
 					"include_apps_usage_instructions": False,

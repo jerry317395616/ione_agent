@@ -60,6 +60,7 @@ def test_model_catalog_has_selected_model(monkeypatch, tmp_path) -> None:
 	assert models[settings.model]["include_skills_usage_instructions"] is True
 	assert all("DeepSeek" not in model["display_name"] for model in models.values())
 	assert all("DeepSeek" not in model["description"] for model in models.values())
+	assert models[settings.model]["base_instructions"] == settings.developer_instructions
 	assert settings.app_server_message_limit_bytes > 64 * 1024
 
 
@@ -112,6 +113,35 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert '"frappe_convert_lead_to_deal"' in config
 	assert '"frappe_read_word_attachment"' in config
 	assert '"frappe_upsert_deal_presentation"' in config
+
+
+def test_prepare_can_limit_skills_and_mcp_tools(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+	monkeypatch.setenv("IONE_FRAPPE_MCP_URL", "https://child.example/api/mcp")
+	monkeypatch.setenv("IONE_FRAPPE_AUTH_HEADER", "token key:secret")
+	monkeypatch.setenv("IONE_CODEX_SKILLS", "tongjianyun")
+	monkeypatch.setenv(
+		"IONE_FRAPPE_MCP_ENABLED_TOOLS",
+		"frappe_get_doctype_meta,frappe_list_documents,frappe_get_document",
+	)
+	settings = Settings.from_environment()
+	settings.prepare()
+	config = (settings.codex_home / "config.toml").read_text(encoding="utf-8")
+	installed_skills = {path.name for path in (settings.codex_home / "skills").iterdir()}
+
+	assert installed_skills == {"tongjianyun"}
+	assert '"frappe_get_doctype_meta"' in config
+	assert '"frappe_list_documents"' in config
+	assert '"frappe_get_document"' in config
+	assert '"frappe_search_doctypes"' not in config
+	assert '"frappe_create_crm_lead_package"' not in config
 
 
 def test_stream_chunk_is_openai_compatible() -> None:
