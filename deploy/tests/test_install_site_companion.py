@@ -70,6 +70,18 @@ def test_compose_has_no_global_names() -> None:
 	assert "${LIBRECHAT_HOST_PORT}" in compose
 
 
+def test_librechat_service_restarts_with_bridge() -> None:
+	service = installer.librechat_service(
+		"child-myyr-top",
+		Path("/srv/child-myyr-top"),
+		"ione-librechat-child-myyr-top",
+		"ione-codex-agent-child-myyr-top",
+		"zyd",
+	)
+	assert "Requires=docker.service ione-codex-agent-child-myyr-top.service" in service
+	assert "PartOf=ione-codex-agent-child-myyr-top.service" in service
+
+
 def test_librechat_config_targets_site_bridge() -> None:
 	config = installer.librechat_config(18100)
 	assert "http://10.144.133.1:18100/v1" in config

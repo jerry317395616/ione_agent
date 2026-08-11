@@ -340,6 +340,7 @@ def librechat_service(slug: str, instance: Path, project: str, bridge_service: s
 Description=I-ONE LibreChat companion for {slug}
 After=docker.service network-online.target {bridge_service}.service
 Requires=docker.service {bridge_service}.service
+PartOf={bridge_service}.service
 Wants=network-online.target
 
 [Service]
