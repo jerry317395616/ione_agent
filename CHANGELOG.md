@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- Add an opt-in Oracle DeepSeek browser primary inference loop for site-scoped bridges.
+- Keep permission-aware Frappe tools in the bridge and automatically fall back to the configured API model if browser inference is unavailable.
+
 ## 0.6.0
 
 - Add an authenticated OpenAI-compatible LibreChat bridge backed by the existing Frappe Agent APIs.

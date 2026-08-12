@@ -11,6 +11,7 @@ from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, ProcessDisplay, latest_user_text, stream_chunk
 from app.dynamic_tools import DynamicToolProxy
 from app.identity import ToolIdentity, issue_actor_token, tool_identity, with_trusted_identity_context
+from app.oracle_browser import OracleBrowserResult, parse_oracle_action
 from app.public_output import sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
@@ -30,6 +31,84 @@ def test_latest_user_text_handles_text_parts() -> None:
 		]
 	)
 	assert latest_user_text(request) == "hello\nworld"
+
+
+def test_parse_oracle_action_accepts_fenced_json() -> None:
+	action = parse_oracle_action(
+		'```json\n{"action":"tool","tool":"frappe_get_context","arguments":{}}\n```'
+	)
+	assert action == {
+		"action": "tool",
+		"tool": "frappe_get_context",
+		"arguments": {},
+	}
+
+
+def test_parse_oracle_action_treats_plain_text_as_reply() -> None:
+	assert parse_oracle_action("你好") == {"action": "reply", "content": "你好"}
+
+
+def test_oracle_browser_drives_permission_aware_tool_then_replies(tmp_path) -> None:
+	class FakeProxy:
+		async def specs(self):
+			return [
+				{
+					"name": "frappe_get_context",
+					"description": "读取上下文",
+					"inputSchema": {"type": "object", "properties": {}},
+				}
+			]
+
+		async def call(self, tool, arguments, *, identity):
+			assert tool == "frappe_get_context"
+			assert arguments == {}
+			assert identity == ToolIdentity("owner@example.com", "Administrator", "child.example")
+			return {
+				"contentItems": [{"type": "inputText", "text": '{"site":"child.example"}'}],
+				"success": True,
+			}
+
+	class FakeOracle:
+		def __init__(self):
+			self.prompts = []
+
+		async def ask(self, *, prompt, conversation_key):
+			self.prompts.append(prompt)
+			assert conversation_key.startswith("child-")
+			if len(self.prompts) == 1:
+				return OracleBrowserResult(
+					'{"action":"tool","tool":"frappe_get_context","arguments":{}}'
+				)
+			return OracleBrowserResult('{"action":"reply","content":"当前站点为 child.example。"}')
+
+	settings = SimpleNamespace(
+		workspace_scope="site",
+		workspace_root=tmp_path,
+		data_dir=tmp_path,
+		oracle_browser_enabled=False,
+		oracle_browser_max_tool_rounds=3,
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_site_host="child.example",
+		identity_audience="child.example",
+	)
+	server = SimpleNamespace(dynamic_tool_proxy=FakeProxy())
+	bridge = CodexBridge(settings, server)
+	bridge.oracle_browser = FakeOracle()
+	request = ChatCompletionRequest(messages=[{"role": "user", "content": "这是哪个站点？"}])
+	try:
+		answer = asyncio.run(
+			bridge._oracle_answer(
+				request,
+				user_id="user-1",
+				conversation_id="conversation-1",
+				manager_user_email="owner@example.com",
+				manager_user_hint="Administrator",
+			)
+		)
+		assert answer == "当前站点为 child.example。"
+		assert len(bridge.oracle_browser.prompts) == 2
+	finally:
+		bridge.close()
 
 
 def test_conversation_store_round_trip(tmp_path) -> None:

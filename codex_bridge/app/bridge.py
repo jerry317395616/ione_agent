@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.app_server import AppServerError, CodexAppServer
 from app.identity import tool_identity, with_trusted_identity_context
+from app.oracle_browser import OracleBrowserClient, OracleBrowserError, parse_oracle_action
 from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
@@ -352,6 +353,15 @@ class CodexBridge:
 		self.app_server = app_server
 		self.store = ConversationStore(settings.data_dir / "conversations.sqlite3")
 		self.locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+		self.oracle_browser = (
+			OracleBrowserClient(
+				base_url=getattr(settings, "oracle_browser_url", "http://127.0.0.1:9474"),
+				token=getattr(settings, "oracle_browser_token", ""),
+				timeout_seconds=getattr(settings, "oracle_browser_timeout_seconds", 180),
+			)
+			if getattr(settings, "oracle_browser_enabled", False)
+			else None
+		)
 
 	def close(self) -> None:
 		self.store.close()
@@ -367,6 +377,97 @@ class CodexBridge:
 		workspace.mkdir(parents=True, exist_ok=True)
 		workspace.chmod(0o700)
 		return workspace
+
+	def _oracle_conversation_key(self, user_id: str, conversation_id: str) -> str:
+		digest = hashlib.sha256(f"{user_id}\0{conversation_id}".encode()).hexdigest()[:40]
+		return f"child-{digest}"
+
+	async def _oracle_answer(
+		self,
+		request: ChatCompletionRequest,
+		*,
+		user_id: str,
+		conversation_id: str,
+		manager_user_email: str | None,
+		manager_user_hint: str | None,
+		progress: asyncio.Queue[str] | None = None,
+	) -> str:
+		if not self.oracle_browser:
+			raise OracleBrowserError("Oracle browser mode is disabled")
+		text = latest_user_text(request)
+		if not text:
+			raise ValueError("A non-empty user message is required")
+		proxy = self.app_server.dynamic_tool_proxy
+		if not proxy:
+			raise OracleBrowserError("Business tool proxy is unavailable")
+		identity = tool_identity(
+			email=manager_user_email,
+			user_hint=manager_user_hint,
+			mcp_url=self.settings.frappe_mcp_url,
+			audience=self.settings.identity_audience,
+			site_host=self.settings.frappe_site_host,
+		)
+		if identity is None:
+			raise OracleBrowserError("The current site identity is unavailable")
+
+		tool_specs = await proxy.specs()
+		compact_tools = [
+			{
+				"name": spec.get("name"),
+				"description": spec.get("description"),
+				"parameters": spec.get("inputSchema") or {"type": "object"},
+			}
+			for spec in tool_specs
+		]
+		tools_json = json.dumps(compact_tools, ensure_ascii=False, separators=(",", ":"))
+		if len(tools_json) > 19_000:
+			tools_json = tools_json[:19_000]
+		conversation_key = self._oracle_conversation_key(user_id, conversation_id)
+		initial_prompt = f"""你是 child.myyr.top 的童健云业务智能助手，也是本轮任务的主推理模型。
+只处理当前登录用户有权限访问的 child 站点业务，默认用简体中文。
+你可以直接回答，也可以逐步调用下列受控业务工具。不要声称尚未验证的操作已经成功。
+所有回复必须是一个 JSON 对象，不要使用 Markdown 代码围栏，也不要输出 JSON 之外的文字：
+1. 最终回答：{{"action":"reply","content":"给用户的完整回答"}}
+2. 调用工具：{{"action":"tool","tool":"工具名称","arguments":{{...}}}}
+一次只调用一个工具。工具返回后再判断下一步；不要自行生成 actor_token，也不要询问或泄露凭据、内部地址和部署细节。
+允许的工具：{tools_json}
+
+用户请求：{text}"""
+		lock_key = f"{user_id}\0{conversation_id}"
+		async with self.locks[lock_key]:
+			prompt = initial_prompt
+			max_tool_rounds = getattr(self.settings, "oracle_browser_max_tool_rounds", 5)
+			for round_index in range(max_tool_rounds + 1):
+				if progress is not None:
+					await progress.put("- 正在分析请求并规划下一步。\n")
+				result = await self.oracle_browser.ask(
+					prompt=prompt,
+					conversation_key=conversation_key,
+				)
+				action = parse_oracle_action(result.reply)
+				action_type = str(action.get("action") or "reply").strip().lower()
+				if action_type != "tool":
+					content = str(action.get("content") or result.reply).strip()
+					if not content:
+						raise OracleBrowserError("Oracle browser returned an empty final response")
+					return content
+				if round_index >= max_tool_rounds:
+					raise OracleBrowserError("Oracle browser exceeded the business tool round limit")
+				tool = str(action.get("tool") or "").strip()
+				arguments = action.get("arguments") or {}
+				if not tool or not isinstance(arguments, dict):
+					raise OracleBrowserError("Oracle browser returned an invalid tool action")
+				if progress is not None:
+					await progress.put(f"- 正在{_tool_label(tool)}。\n")
+				tool_result = await proxy.call(tool, arguments, identity=identity)
+				tool_payload = json.dumps(tool_result, ensure_ascii=False, separators=(",", ":"))
+				if len(tool_payload) > 20_000:
+					tool_payload = f"{tool_payload[:20_000]}…"
+				prompt = f"""受控业务工具已经返回结果：
+工具：{tool}
+结果：{tool_payload}
+请继续处理。仍然只返回一个 JSON 对象：需要下一工具时返回 action=tool；任务完成时返回 action=reply，并在最终回答中准确说明已完成和未完成的事项。"""
+		raise OracleBrowserError("Oracle browser did not finish the request")
 
 	async def _thread(self, user_id: str, conversation_id: str) -> str:
 		thread_id = self.store.get(user_id, conversation_id)
@@ -466,6 +567,18 @@ class CodexBridge:
 		manager_user_email: str | None = None,
 		manager_user_hint: str | None = None,
 	) -> dict[str, Any]:
+		if getattr(self, "oracle_browser", None):
+			try:
+				answer = await self._oracle_answer(
+					request,
+					user_id=user_id,
+					conversation_id=conversation_id,
+					manager_user_email=manager_user_email,
+					manager_user_hint=manager_user_hint,
+				)
+				return completion_response(request.model, sanitize_public_text(answer))
+			except (OracleBrowserError, OSError, TimeoutError):
+				logger.exception("Oracle browser primary inference failed; using configured fallback")
 		messages = AgentMessageCollector()
 		status = "completed"
 		error = ""
@@ -511,6 +624,57 @@ class CodexBridge:
 			request.model,
 			{"reasoning_content": process_display.initial()},
 		)
+		if getattr(self, "oracle_browser", None):
+			progress: asyncio.Queue[str] = asyncio.Queue()
+			oracle_task = asyncio.create_task(
+				self._oracle_answer(
+					request,
+					user_id=user_id,
+					conversation_id=conversation_id,
+					manager_user_email=manager_user_email,
+					manager_user_hint=manager_user_hint,
+					progress=progress,
+				)
+			)
+			try:
+				while not oracle_task.done():
+					try:
+						message = await asyncio.wait_for(
+							progress.get(), timeout=self.settings.keepalive_seconds
+						)
+					except TimeoutError:
+						yield ": keepalive\n\n"
+					else:
+						yield stream_chunk(
+							completion_id,
+							request.model,
+							{"reasoning_content": message},
+						)
+				answer = await oracle_task
+				yield stream_chunk(
+					completion_id,
+					request.model,
+					{"reasoning_content": "- 处理完成，正在整理结果。\n"},
+				)
+				yield stream_chunk(
+					completion_id,
+					request.model,
+					{"content": sanitize_public_text(answer)},
+				)
+				yield stream_chunk(completion_id, request.model, {}, finish_reason="stop")
+				yield "data: [DONE]\n\n"
+				return
+			except asyncio.CancelledError:
+				oracle_task.cancel()
+				await asyncio.gather(oracle_task, return_exceptions=True)
+				raise
+			except (OracleBrowserError, OSError, TimeoutError):
+				logger.exception("Oracle browser primary inference failed; using configured fallback")
+				yield stream_chunk(
+					completion_id,
+					request.model,
+					{"reasoning_content": "- 主推理暂时不可用，正在切换备用推理。\n"},
+				)
 		messages = AgentMessageCollector()
 		status = "completed"
 		error = ""

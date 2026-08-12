@@ -98,6 +98,11 @@ class Settings:
 	enabled_skills: tuple[str, ...]
 	identity_shared_secret: str
 	identity_audience: str
+	oracle_browser_enabled: bool
+	oracle_browser_url: str
+	oracle_browser_token: str
+	oracle_browser_timeout_seconds: int
+	oracle_browser_max_tool_rounds: int
 
 	@classmethod
 	def from_environment(cls) -> Settings:
@@ -151,6 +156,19 @@ class Settings:
 			enabled_skills=csv_values("IONE_CODEX_SKILLS"),
 			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
 			identity_audience=identity_audience,
+			oracle_browser_enabled=as_bool("IONE_ORACLE_BROWSER_ENABLED", False),
+			oracle_browser_url=os.getenv(
+				"IONE_ORACLE_BROWSER_URL", "http://127.0.0.1:9474"
+			).strip().rstrip("/"),
+			oracle_browser_token=os.getenv("IONE_ORACLE_BROWSER_TOKEN", "").strip(),
+			oracle_browser_timeout_seconds=max(
+				30,
+				min(720, int(os.getenv("IONE_ORACLE_BROWSER_TIMEOUT_SECONDS", "180"))),
+			),
+			oracle_browser_max_tool_rounds=max(
+				1,
+				min(8, int(os.getenv("IONE_ORACLE_BROWSER_MAX_TOOL_ROUNDS", "5"))),
+			),
 		)
 
 	@property
@@ -167,6 +185,11 @@ class Settings:
 		for path in (self.codex_home, self.data_dir, self.workspace_root):
 			path.mkdir(parents=True, exist_ok=True)
 			path.chmod(0o700)
+		if self.oracle_browser_enabled:
+			if not self.oracle_browser_url.startswith(("http://127.0.0.1:", "http://localhost:")):
+				raise RuntimeError("IONE_ORACLE_BROWSER_URL must use a local loopback address")
+			if len(self.oracle_browser_token) < 16:
+				raise RuntimeError("IONE_ORACLE_BROWSER_TOKEN is missing or too short")
 		target_skills_dir = self.codex_home / "skills"
 		if self.enabled_skills:
 			if target_skills_dir.exists():
