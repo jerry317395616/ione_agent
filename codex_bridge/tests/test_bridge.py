@@ -111,6 +111,42 @@ def test_oracle_browser_drives_permission_aware_tool_then_replies(tmp_path) -> N
 		bridge.close()
 
 
+def test_oracle_browser_can_answer_without_site_identity(tmp_path) -> None:
+	class FakeProxy:
+		async def specs(self):
+			return []
+
+	class FakeOracle:
+		async def ask(self, *, prompt, conversation_key):
+			return OracleBrowserResult('{"action":"reply","content":"你好。"}')
+
+	settings = SimpleNamespace(
+		workspace_scope="site",
+		workspace_root=tmp_path,
+		data_dir=tmp_path,
+		oracle_browser_enabled=False,
+		oracle_browser_max_tool_rounds=3,
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_site_host="child.example",
+		identity_audience="child.example",
+	)
+	bridge = CodexBridge(settings, SimpleNamespace(dynamic_tool_proxy=FakeProxy()))
+	bridge.oracle_browser = FakeOracle()
+	try:
+		answer = asyncio.run(
+			bridge._oracle_answer(
+				ChatCompletionRequest(messages=[{"role": "user", "content": "你好"}]),
+				user_id="anonymous",
+				conversation_id="conversation-1",
+				manager_user_email=None,
+				manager_user_hint=None,
+			)
+		)
+		assert answer == "你好。"
+	finally:
+		bridge.close()
+
+
 def test_conversation_store_round_trip(tmp_path) -> None:
 	store = ConversationStore(tmp_path / "conversations.sqlite3")
 	assert store.get("user", "conversation") is None

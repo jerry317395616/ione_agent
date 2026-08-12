@@ -407,9 +407,6 @@ class CodexBridge:
 			audience=self.settings.identity_audience,
 			site_host=self.settings.frappe_site_host,
 		)
-		if identity is None:
-			raise OracleBrowserError("The current site identity is unavailable")
-
 		tool_specs = await proxy.specs()
 		compact_tools = [
 			{
@@ -457,6 +454,11 @@ class CodexBridge:
 				arguments = action.get("arguments") or {}
 				if not tool or not isinstance(arguments, dict):
 					raise OracleBrowserError("Oracle browser returned an invalid tool action")
+				if identity is None:
+					prompt = """当前请求缺少可验证的登录身份，因此不能调用站点业务工具。
+请不要猜测或声称已经读取、创建或修改任何业务数据。只返回一个 JSON 对象：
+{"action":"reply","content":"请重新进入 AI 员工后再执行需要访问站点数据的操作。普通问答仍可继续。"}"""
+					continue
 				if progress is not None:
 					await progress.put(f"- 正在{_tool_label(tool)}。\n")
 				tool_result = await proxy.call(tool, arguments, identity=identity)
