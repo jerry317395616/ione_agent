@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from app.identity import ToolIdentity, issue_actor_token
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -33,10 +34,25 @@ class DynamicToolProxy:
 				self._specs = await asyncio.to_thread(self._load_specs)
 		return self._specs
 
-	async def call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+	async def call(
+		self,
+		tool: str,
+		arguments: dict[str, Any],
+		*,
+		identity: ToolIdentity | None,
+	) -> dict[str, Any]:
 		await self.specs()
 		if tool not in self._tool_names:
 			return self._failure("该业务工具未启用。")
+		if identity is None or len(self.settings.identity_shared_secret) < 32:
+			return self._failure("当前登录身份不完整，请重新进入 I-ONE Agent 后重试。")
+		arguments = dict(arguments)
+		arguments["actor_token"] = issue_actor_token(
+			email=identity.email,
+			user_hint=identity.user_hint,
+			audience=identity.audience,
+			secret=self.settings.identity_shared_secret,
+		)
 		try:
 			response = await asyncio.to_thread(
 				self._rpc,
@@ -72,12 +88,26 @@ class DynamicToolProxy:
 			name = str(definition.get("name") or "")
 			if not name or (allowed and name not in allowed):
 				continue
+			input_schema = definition.get("inputSchema") or {
+				"type": "object",
+				"properties": {},
+			}
+			if isinstance(input_schema, dict):
+				input_schema = dict(input_schema)
+				properties = input_schema.get("properties")
+				if isinstance(properties, dict):
+					properties = dict(properties)
+					properties.pop("actor_token", None)
+					input_schema["properties"] = properties
+				required = input_schema.get("required")
+				if isinstance(required, list):
+					input_schema["required"] = [item for item in required if item != "actor_token"]
 			specs.append(
 				{
 					"type": "function",
 					"name": name,
 					"description": str(definition.get("description") or ""),
-					"inputSchema": definition.get("inputSchema") or {"type": "object", "properties": {}},
+					"inputSchema": input_schema,
 				}
 			)
 		self._tool_names = {spec["name"] for spec in specs}

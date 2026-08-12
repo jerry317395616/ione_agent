@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from app.dynamic_tools import DynamicToolProxy
+from app.identity import ToolIdentity
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class CodexAppServer:
 		self.pending: dict[int, asyncio.Future] = {}
 		self.subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
 		self.loaded_threads: set[str] = set()
+		self.active_tool_identities: dict[str, ToolIdentity] = {}
 		self.generation = 0
 		self.dynamic_tool_proxy = (
 			DynamicToolProxy(settings)
@@ -96,17 +98,14 @@ class CodexAppServer:
 		stderr_task = self.stderr_task
 		self.reader_task = None
 		self.stderr_task = None
+		self.active_tool_identities.clear()
 		for task in (reader_task, stderr_task):
 			if task and task is not asyncio.current_task():
 				task.cancel()
 		if process:
 			await self._terminate_process(process)
 		await asyncio.gather(
-			*(
-				task
-				for task in (reader_task, stderr_task)
-				if task and task is not asyncio.current_task()
-			),
+			*(task for task in (reader_task, stderr_task) if task and task is not asyncio.current_task()),
 			return_exceptions=True,
 		)
 		self._fail_pending(AppServerError("Codex App Server stopped"))
@@ -192,9 +191,7 @@ class CodexAppServer:
 				self.stderr_task = None
 			self.loaded_threads.clear()
 			self._fail_pending(failure)
-			await self._publish(
-				{"method": "bridge/processExited", "params": {"message": str(failure)}}
-			)
+			await self._publish({"method": "bridge/processExited", "params": {"message": str(failure)}})
 			if owned_process:
 				if stderr_task and stderr_task is not asyncio.current_task():
 					stderr_task.cancel()
@@ -225,7 +222,12 @@ class CodexAppServer:
 			if not isinstance(arguments, dict):
 				result = DynamicToolProxy._failure("业务工具参数格式无效。")
 			else:
-				result = await self.dynamic_tool_proxy.call(tool, arguments)
+				identity = self.active_tool_identities.get(str(params.get("threadId") or ""))
+				result = await self.dynamic_tool_proxy.call(
+					tool,
+					arguments,
+					identity=identity,
+				)
 			await self._publish(
 				{
 					"method": "bridge/dynamicTool/completed",
@@ -262,9 +264,11 @@ class CodexAppServer:
 	async def _publish(self, message: dict[str, Any]) -> None:
 		params = message.get("params") or {}
 		thread_id = params.get("threadId")
-		targets = list(self.subscribers.get(str(thread_id), ())) if thread_id else [
-			queue for queues in self.subscribers.values() for queue in queues
-		]
+		targets = (
+			list(self.subscribers.get(str(thread_id), ()))
+			if thread_id
+			else [queue for queues in self.subscribers.values() for queue in queues]
+		)
 		for queue in targets:
 			await queue.put(message)
 
@@ -272,6 +276,18 @@ class CodexAppServer:
 		for future in list(self.pending.values()):
 			if not future.done():
 				future.set_exception(error)
+
+	def bind_tool_identity(self, thread_id: str, identity: ToolIdentity | None) -> None:
+		"""Bind an identity to one active thread without persisting credentials."""
+		if identity is None:
+			self.active_tool_identities.pop(thread_id, None)
+		else:
+			self.active_tool_identities[thread_id] = identity
+
+	def clear_tool_identity(self, thread_id: str, identity: ToolIdentity | None) -> None:
+		"""Clear only the binding owned by the completing turn."""
+		if self.active_tool_identities.get(thread_id) is identity:
+			self.active_tool_identities.pop(thread_id, None)
 
 	@asynccontextmanager
 	async def subscribe(self, thread_id: str) -> AsyncIterator[asyncio.Queue]:

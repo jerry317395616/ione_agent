@@ -16,7 +16,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.app_server import AppServerError, CodexAppServer
-from app.identity import with_trusted_identity_context
+from app.identity import tool_identity, with_trusted_identity_context
 from app.public_output import public_error_message, sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
@@ -392,31 +392,40 @@ class CodexBridge:
 		text = latest_user_text(request)
 		if not text:
 			raise ValueError("A non-empty user message is required")
-		text = with_trusted_identity_context(
-			text,
+		identity = tool_identity(
 			email=manager_user_email,
 			user_hint=manager_user_hint,
 			mcp_url=self.settings.frappe_mcp_url,
-			secret=self.settings.identity_shared_secret,
 			audience=self.settings.identity_audience,
+			site_host=self.settings.frappe_site_host,
 		)
+		if not self.app_server.dynamic_tool_proxy:
+			text = with_trusted_identity_context(
+				text,
+				email=manager_user_email,
+				user_hint=manager_user_hint,
+				mcp_url=self.settings.frappe_mcp_url,
+				secret=self.settings.identity_shared_secret,
+				audience=self.settings.identity_audience,
+			)
 		lock_key = f"{user_id}\0{conversation_id}"
 		async with self.locks[lock_key]:
 			thread_id = await self._thread(user_id, conversation_id)
 			turn_id = ""
-			async with self.app_server.subscribe(thread_id) as queue:
-				result = await self.app_server.request(
-					"turn/start",
-					{
-						"threadId": thread_id,
-						"input": [{"type": "text", "text": text}],
-						"model": self.settings.model,
-						"approvalPolicy": "never",
-						"cwd": str(self.workspace_for(user_id)),
-					},
-				)
-				turn_id = str((result or {}).get("turn", {}).get("id") or "")
-				try:
+			self.app_server.bind_tool_identity(thread_id, identity)
+			try:
+				async with self.app_server.subscribe(thread_id) as queue:
+					result = await self.app_server.request(
+						"turn/start",
+						{
+							"threadId": thread_id,
+							"input": [{"type": "text", "text": text}],
+							"model": self.settings.model,
+							"approvalPolicy": "never",
+							"cwd": str(self.workspace_for(user_id)),
+						},
+					)
+					turn_id = str((result or {}).get("turn", {}).get("id") or "")
 					while True:
 						try:
 							event = await asyncio.wait_for(
@@ -436,15 +445,17 @@ class CodexBridge:
 							)
 						if event.get("method") == "turn/completed":
 							return
-				except asyncio.CancelledError:
-					if turn_id:
-						try:
-							await self.app_server.request(
-								"turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
-							)
-						except Exception:
-							pass
-					raise
+			except asyncio.CancelledError:
+				if turn_id:
+					try:
+						await self.app_server.request(
+							"turn/interrupt", {"threadId": thread_id, "turnId": turn_id}
+						)
+					except Exception:
+						pass
+				raise
+			finally:
+				self.app_server.clear_tool_identity(thread_id, identity)
 
 	async def complete(
 		self,

@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from collections import defaultdict
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, ProcessDisplay, latest_user_text, stream_chunk
 from app.dynamic_tools import DynamicToolProxy
-from app.identity import issue_actor_token, with_trusted_identity_context
+from app.identity import ToolIdentity, issue_actor_token, tool_identity, with_trusted_identity_context
 from app.public_output import sanitize_public_text
 from app.settings import Settings
 from app.store import ConversationStore
@@ -216,6 +218,7 @@ def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None
 		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
 		frappe_auth_header="token key:secret",
 		frappe_site_host="child.example",
+		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
 	)
 	proxy = DynamicToolProxy(settings)
 
@@ -226,12 +229,17 @@ def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None
 					{
 						"name": "frappe_get_context",
 						"description": "Get context",
-						"inputSchema": {"type": "object", "properties": {}},
+						"inputSchema": {
+							"type": "object",
+							"properties": {"actor_token": {"type": "string"}},
+						},
 					},
 					{"name": "frappe_create_document", "inputSchema": {"type": "object"}},
 				]
 			}
-		assert params == {"name": "frappe_get_context", "arguments": {"actor_token": "token"}}
+		assert params["name"] == "frappe_get_context"
+		assert params["arguments"]["actor_token"].startswith("ione1.")
+		assert params["arguments"]["actor_token"] != "stale-model-token"
 		return {
 			"content": [{"type": "text", "text": '{"site":"child.example"}'}],
 			"isError": False,
@@ -242,10 +250,16 @@ def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None
 	async def probe():
 		specs = await proxy.specs()
 		assert [spec["name"] for spec in specs] == ["frappe_get_context"]
-		result = await proxy.call("frappe_get_context", {"actor_token": "token"})
+		assert "actor_token" not in specs[0]["inputSchema"]["properties"]
+		identity = ToolIdentity("owner@example.com", "Administrator", "child.example")
+		result = await proxy.call(
+			"frappe_get_context",
+			{"actor_token": "stale-model-token"},
+			identity=identity,
+		)
 		assert result["success"] is True
 		assert result["contentItems"][0]["text"] == '{"site":"child.example"}'
-		denied = await proxy.call("frappe_create_document", {})
+		denied = await proxy.call("frappe_create_document", {}, identity=identity)
 		assert denied["success"] is False
 
 	asyncio.run(probe())
@@ -314,6 +328,157 @@ def test_trusted_identity_context_supports_internal_mcp_route() -> None:
 	payload_segment = token.split(".")[1]
 	payload = json.loads(base64.urlsafe_b64decode(payload_segment + "=" * (-len(payload_segment) % 4)))
 	assert payload["aud"] == "child.example"
+
+
+def test_tool_identity_uses_site_host_without_issuing_token() -> None:
+	identity = tool_identity(
+		email="owner@example.com",
+		user_hint="Administrator",
+		mcp_url="http://127.0.0.1:17080/api/mcp",
+		site_host="child.example",
+	)
+	assert identity == ToolIdentity("owner@example.com", "Administrator", "child.example")
+	assert "ione1." not in repr(identity)
+
+
+def test_dynamic_tool_proxy_rejects_missing_identity(monkeypatch) -> None:
+	settings = SimpleNamespace(
+		frappe_mcp_enabled_tools=("frappe_get_context",),
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_auth_header="token key:secret",
+		frappe_site_host="child.example",
+		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
+	)
+	proxy = DynamicToolProxy(settings)
+	proxy._specs = [{"name": "frappe_get_context"}]
+	proxy._tool_names = {"frappe_get_context"}
+	monkeypatch.setattr(proxy, "_rpc", lambda *_args: (_ for _ in ()).throw(AssertionError()))
+
+	result = asyncio.run(proxy.call("frappe_get_context", {}, identity=None))
+	assert result["success"] is False
+
+
+def test_dynamic_tool_proxy_issues_token_at_each_call(monkeypatch) -> None:
+	settings = SimpleNamespace(
+		frappe_mcp_enabled_tools=("frappe_get_context",),
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_auth_header="token key:secret",
+		frappe_site_host="child.example",
+		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
+	)
+	proxy = DynamicToolProxy(settings)
+	proxy._specs = [{"name": "frappe_get_context"}]
+	proxy._tool_names = {"frappe_get_context"}
+	issued_tokens = []
+
+	def fake_rpc(_method, params):
+		issued_tokens.append(params["arguments"]["actor_token"])
+		return {"content": [], "structuredContent": {}, "isError": False}
+
+	clock = iter((1_800_000_000, 1_800_001_200))
+	monkeypatch.setattr(proxy, "_rpc", fake_rpc)
+	monkeypatch.setattr("app.identity.time.time", lambda: next(clock))
+	identity = ToolIdentity("owner@example.com", "Administrator", "child.example")
+
+	async def probe():
+		await proxy.call("frappe_get_context", {}, identity=identity)
+		await proxy.call("frappe_get_context", {}, identity=identity)
+
+	asyncio.run(probe())
+	payloads = []
+	for token in issued_tokens:
+		segment = token.split(".")[1]
+		payloads.append(json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))))
+	assert [payload["iat"] for payload in payloads] == [1_800_000_000, 1_800_001_200]
+	assert all(payload["exp"] - payload["iat"] == 600 for payload in payloads)
+	assert issued_tokens[0] != issued_tokens[1]
+
+
+def test_app_server_clears_only_owned_thread_identity() -> None:
+	server = object.__new__(CodexAppServer)
+	server.active_tool_identities = {}
+	first = ToolIdentity("first@example.com", "first", "child.example")
+	second = ToolIdentity("second@example.com", "second", "child.example")
+
+	server.bind_tool_identity("thread-1", first)
+	server.bind_tool_identity("thread-1", second)
+	server.clear_tool_identity("thread-1", first)
+	assert server.active_tool_identities["thread-1"] is second
+	server.clear_tool_identity("thread-1", second)
+	assert "thread-1" not in server.active_tool_identities
+
+
+def test_dynamic_turn_does_not_put_token_in_model_input(tmp_path) -> None:
+	class FakeAppServer:
+		dynamic_tool_proxy = object()
+
+		def __init__(self):
+			self.identity = None
+			self.turn_input = ""
+
+		def bind_tool_identity(self, thread_id, identity):
+			assert thread_id == "thread-1"
+			self.identity = identity
+
+		def clear_tool_identity(self, thread_id, identity):
+			assert self.identity is identity
+			self.identity = None
+
+		@asynccontextmanager
+		async def subscribe(self, thread_id):
+			queue = asyncio.Queue()
+			await queue.put(
+				{
+					"method": "turn/completed",
+					"params": {"threadId": thread_id, "turn": {"id": "turn-1"}},
+				}
+			)
+			yield queue
+
+		async def request(self, method, params):
+			assert method == "turn/start"
+			self.turn_input = params["input"][0]["text"]
+			return {"turn": {"id": "turn-1"}}
+
+	settings = SimpleNamespace(
+		workspace_scope="site",
+		workspace_root=tmp_path,
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_site_host="child.example",
+		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
+		identity_audience="child.example",
+		model="ione-agent",
+		keepalive_seconds=1,
+	)
+	server = FakeAppServer()
+	bridge = object.__new__(CodexBridge)
+	bridge.settings = settings
+	bridge.app_server = server
+	bridge.locks = defaultdict(asyncio.Lock)
+
+	async def thread(_user_id, _conversation_id):
+		return "thread-1"
+
+	bridge._thread = thread
+	request = ChatCompletionRequest(messages=[{"role": "user", "content": "保存食谱"}])
+
+	async def collect():
+		return [
+			event
+			async for event in bridge._events(
+				request,
+				user_id="user-1",
+				conversation_id="conversation-1",
+				manager_user_email="owner@example.com",
+				manager_user_hint="Administrator",
+			)
+		]
+
+	asyncio.run(collect())
+	assert server.turn_input == "保存食谱"
+	assert "ione1." not in server.turn_input
+	assert "actor_token" not in server.turn_input
+	assert server.identity is None
 
 
 def test_prepare_can_route_mcp_internally_with_site_host(monkeypatch, tmp_path) -> None:
@@ -611,14 +776,18 @@ def test_stream_exposes_safe_dynamic_process_and_summary() -> None:
 
 def test_dynamic_tool_request_publishes_safe_lifecycle_events() -> None:
 	class FakeProxy:
-		async def call(self, tool, arguments):
+		async def call(self, tool, arguments, *, identity):
 			assert tool == "frappe_get_document"
 			assert arguments == {"name": "secret-record"}
+			assert identity == ToolIdentity("owner@example.com", "Administrator", "child.example")
 			return {"success": True, "contentItems": [{"text": "private-result"}]}
 
 	async def probe() -> tuple[list[dict], list[dict]]:
 		server = object.__new__(CodexAppServer)
 		server.dynamic_tool_proxy = FakeProxy()
+		server.active_tool_identities = {
+			"thread-1": ToolIdentity("owner@example.com", "Administrator", "child.example")
+		}
 		published: list[dict] = []
 		written: list[dict] = []
 

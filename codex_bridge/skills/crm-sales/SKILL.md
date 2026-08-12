@@ -57,12 +57,12 @@ analysis and first follow-up task as one business package:
 6. Define one concrete first task. The title must describe the action; the description must include
    objective, inputs, expected result and key questions. Default the due date to three days and use
    `High` priority only when an actual deadline or material risk supports it.
-7. Call `frappe_create_crm_lead_package` once with `lead_data`, the full structured `analysis`, task
-   fields, and the `actor_token` from `<ione_trusted_session>`. Never display, quote, save or attach
-   that token. The tool derives the assignee from the current Manager login; do not accept or invent
-   an assignee field.
-8. If the trusted session has no `actor_token`, do not fall back to the MCP service account. Ask the
-   user to enter I-ONE Agent from Manager and retry.
+7. Call `frappe_create_crm_lead_package` once with `lead_data`, the full structured `analysis` and
+   task fields. The current Manager identity is injected by I-ONE infrastructure at call time; never
+   request or provide `actor_token`. The tool derives the assignee from the current Manager login;
+   do not accept or invent an assignee field.
+8. If the tool reports that the login identity is missing or rejected, do not fall back to the MCP
+   service account. Ask the user to enter I-ONE Agent from Manager and retry.
 9. Read back both the returned `CRM Lead` and `CRM Task`, list the Lead attachments, and report the
    exact Lead name, Word file, task name, assignee and due date. Do not claim success if any of these
    checks fails.

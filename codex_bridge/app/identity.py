@@ -5,11 +5,20 @@ import hashlib
 import hmac
 import json
 import time
+from dataclasses import dataclass
 from urllib.parse import urlparse
-
 
 TOKEN_PREFIX = "ione1"
 TOKEN_TTL_SECONDS = 600
+
+
+@dataclass(frozen=True)
+class ToolIdentity:
+	"""Validated login identity retained only for one active Agent turn."""
+
+	email: str
+	user_hint: str
+	audience: str
 
 
 def _encode(value: bytes) -> str:
@@ -67,6 +76,30 @@ def issue_actor_token(
 	return f"{signed}.{_encode(signature)}"
 
 
+def tool_identity(
+	*,
+	email: str | None,
+	user_hint: str | None = None,
+	mcp_url: str,
+	audience: str | None = None,
+	site_host: str | None = None,
+) -> ToolIdentity | None:
+	"""Normalize one login identity without issuing or exposing a token."""
+	manager_email = normalize_manager_email(email)
+	target_audience = (
+		str(audience or "").strip().lower()
+		or str(site_host or "").strip().lower()
+		or manager_site_from_url(mcp_url)
+	)
+	if not manager_email or not target_audience:
+		return None
+	return ToolIdentity(
+		email=manager_email,
+		user_hint=normalize_manager_user_hint(user_hint),
+		audience=target_audience,
+	)
+
+
 def with_trusted_identity_context(
 	text: str,
 	*,
@@ -76,15 +109,19 @@ def with_trusted_identity_context(
 	secret: str,
 	audience: str | None = None,
 ) -> str:
-	"""Add an authenticated tool-only identity token without changing the user's request."""
-	manager_email = normalize_manager_email(email)
-	target_audience = str(audience or "").strip().lower() or manager_site_from_url(mcp_url)
-	if not manager_email or not target_audience or len(secret) < 32:
+	"""Compatibility path for deployments that cannot proxy dynamic tool calls."""
+	identity = tool_identity(
+		email=email,
+		user_hint=user_hint,
+		mcp_url=mcp_url,
+		audience=audience,
+	)
+	if identity is None or len(secret) < 32:
 		return text
 	token = issue_actor_token(
-		email=manager_email,
-		user_hint=user_hint,
-		audience=target_audience,
+		email=identity.email,
+		user_hint=identity.user_hint,
+		audience=identity.audience,
 		secret=secret,
 	)
 	return (
