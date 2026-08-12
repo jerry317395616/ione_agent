@@ -44,6 +44,9 @@ description: 童健云业务专用操作规范。处理健康数据、膳食营�
 
 ## 完整食谱保存
 
+- 用户上传 Excel、CSV 食谱时，不要把整份附件交给模型自行拼装 JSON。桥接服务会先创建持久化食谱导入任务，确定性识别标题、日期、餐次、菜品、带量和食材关系，并返回预览、置信度和问题清单。
+- 上传后先向用户展示解析统计。存在错误时不得写入；存在菜品与食材关系警告时，必须等待用户明确回复“确认按当前解析结果录入食谱”。
+- 用户后续回复“录入食谱”时，要继续使用当前对话中最新的导入任务，不要再次索要已经上传的附件或食谱数据。
 - 创建或替换一周完整食谱时，必须使用 `frappe_upsert_tongjianyun_recipe`，不要分别调用通用创建工具写入 `Tongjianyun Recipe Dish` 或 `Tongjianyun Recipe Ingredient`。
 - `recipe` 必须包含 `recipeId`、`title`，并按已有数据填写 `weekStart`、`weekEnd`、`sourceFileName`、`parser`、`relationSource` 等来源信息。
 - `days` 中每一天使用 `id`、`date`、`day` 和 `portions`；每个餐次使用 `slot`、`label`、`dishes`、`amountPerChild`、`totalAmount` 和 `dishIngredientRows`。

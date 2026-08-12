@@ -19,6 +19,15 @@ from app.app_server import AppServerError, CodexAppServer
 from app.identity import tool_identity, with_trusted_identity_context
 from app.oracle_browser import OracleBrowserClient, OracleBrowserError, parse_oracle_action
 from app.public_output import public_error_message, sanitize_public_text
+from app.recipe_import import (
+	decode_tool_result,
+	has_recipe_attachment,
+	parse_recipe_attachment,
+	preview_text,
+	result_payload,
+	wants_recipe_commit,
+	wants_recipe_preview,
+)
 from app.settings import Settings
 from app.store import ConversationStore
 
@@ -317,6 +326,10 @@ def latest_user_text(request: ChatCompletionRequest) -> str:
 	return ""
 
 
+def _compact_text(value: str) -> str:
+	return re.sub(r"\s+", "", value or "")
+
+
 def completion_response(model: str, answer: str) -> dict[str, Any]:
 	return {
 		"id": f"chatcmpl-{uuid.uuid4().hex}",
@@ -382,6 +395,93 @@ class CodexBridge:
 		digest = hashlib.sha256(f"{user_id}\0{conversation_id}".encode()).hexdigest()[:40]
 		return f"child-{digest}"
 
+	async def _recipe_import_answer(
+		self,
+		text: str,
+		*,
+		user_id: str,
+		conversation_id: str,
+		manager_user_email: str | None,
+		manager_user_hint: str | None,
+	) -> str | None:
+		"""Handle recipe uploads deterministically before invoking a language model."""
+
+		if has_recipe_attachment(text):
+			try:
+				draft = parse_recipe_attachment(text).as_dict()
+			except ValueError as exc:
+				return f"食谱文件无法可靠解析：{exc}。未写入任何数据，请检查表头、日期和餐次后重新上传。"
+			self.store.save_recipe_import(user_id, conversation_id, draft)
+			return preview_text(draft)
+
+		if not (wants_recipe_commit(text) or wants_recipe_preview(text)):
+			return None
+		if not hasattr(self, "store"):
+			return None
+		draft = self.store.latest_recipe_import(user_id, conversation_id)
+		if not draft:
+			return "当前对话没有待处理的食谱附件。请先上传 Excel 或 CSV 食谱文件。"
+		if wants_recipe_preview(text) and not wants_recipe_commit(text):
+			return preview_text(draft)
+		if draft.get("status") == "committed":
+			result = draft.get("commit_result") or {}
+			return (
+				f"该食谱已经录入童健云，记录编号为 {result.get('name') or result.get('recipe_id') or '—'}。"
+			)
+		stats = draft.get("stats") or {}
+		if int(stats.get("error_count") or 0):
+			return f"食谱导入任务 {draft.get('task_id')} 存在阻断错误，暂不能写入。\n\n{preview_text(draft)}"
+		if int(stats.get("warning_count") or 0) and "确认" not in _compact_text(text):
+			return (
+				f"食谱导入任务 {draft.get('task_id')} 有 {stats.get('warning_count')} 条关系提示。"
+				"为避免把食材写到错误菜品，请先核对预览，再回复“确认按当前解析结果录入食谱”。"
+			)
+
+		proxy = self.app_server.dynamic_tool_proxy
+		if not proxy:
+			return "童健云食谱写入服务暂时不可用，解析结果已经保存，可以稍后继续录入。"
+		identity = tool_identity(
+			email=manager_user_email,
+			user_hint=manager_user_hint,
+			mcp_url=self.settings.frappe_mcp_url,
+			audience=self.settings.identity_audience,
+			site_host=self.settings.frappe_site_host,
+		)
+		if identity is None:
+			return "当前登录身份无法验证。解析结果已经保存，请重新进入 AI 员工后回复“录入食谱”。"
+		payload = result_payload(draft)
+		result = await proxy.call(
+			"frappe_upsert_tongjianyun_recipe",
+			payload,
+			identity=identity,
+		)
+		decoded = decode_tool_result(result)
+		if not result.get("success") or not decoded:
+			self.store.finish_recipe_import(
+				str(draft["task_id"]), status="failed", result=decoded or result
+			)
+			return "食谱解析结果已保留，但本次写入失败。没有返回可核验的童健云记录，请稍后重试。"
+		expected = draft.get("stats") or {}
+		mismatches = []
+		for count_field in ("day_count", "dish_count", "ingredient_count"):
+			if int(decoded.get(count_field) or -1) != int(expected.get(count_field) or 0):
+				mismatches.append(count_field)
+		if mismatches:
+			self.store.finish_recipe_import(
+				str(draft["task_id"]), status="failed", result=decoded
+			)
+			return "童健云写入后的回读数量与解析预览不一致，系统已标记为失败，请管理员检查数据。"
+		self.store.finish_recipe_import(str(draft["task_id"]), status="committed", result=decoded)
+		return (
+			f"食谱已准确录入童健云。\n\n"
+			f"- 食谱：{decoded.get('title') or (draft.get('recipe') or {}).get('title')}\n"
+			f"- 记录编号：{decoded.get('name') or decoded.get('recipe_id')}\n"
+			f"- 日期：{decoded.get('week_start') or expected.get('week_start')} 至 "
+			f"{decoded.get('week_end') or expected.get('week_end')}\n"
+			f"- 已核验：{decoded.get('day_count')} 天、{decoded.get('dish_count')} 道菜、"
+			f"{decoded.get('ingredient_count')} 条食材明细"
+		)
+
 	async def _oracle_answer(
 		self,
 		request: ChatCompletionRequest,
@@ -397,6 +497,14 @@ class CodexBridge:
 		text = latest_user_text(request)
 		if not text:
 			raise ValueError("A non-empty user message is required")
+		if recipe_answer := await self._recipe_import_answer(
+			text,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			manager_user_email=manager_user_email,
+			manager_user_hint=manager_user_hint,
+		):
+			return recipe_answer
 		proxy = self.app_server.dynamic_tool_proxy
 		if not proxy:
 			raise OracleBrowserError("Business tool proxy is unavailable")
@@ -495,6 +603,19 @@ class CodexBridge:
 		text = latest_user_text(request)
 		if not text:
 			raise ValueError("A non-empty user message is required")
+		if recipe_answer := await self._recipe_import_answer(
+			text,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			manager_user_email=manager_user_email,
+			manager_user_hint=manager_user_hint,
+		):
+			yield {
+				"method": "item/completed",
+				"params": {"item": {"type": "agentMessage", "text": recipe_answer}},
+			}
+			yield {"method": "turn/completed", "params": {"turn": {"status": "completed"}}}
+			return
 		identity = tool_identity(
 			email=manager_user_email,
 			user_hint=manager_user_hint,
