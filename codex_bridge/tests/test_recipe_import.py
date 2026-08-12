@@ -67,6 +67,8 @@ def test_recipe_import_store_survives_next_turn(tmp_path: Path) -> None:
 	assert loaded is not None
 	assert loaded["status"] == "committed"
 	assert loaded["commit_result"]["name"] == "2026-W17"
+	store.delete_recipe_imports("user", "conversation")
+	assert store.latest_recipe_import("user", "conversation") is None
 	store.close()
 
 

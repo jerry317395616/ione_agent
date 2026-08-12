@@ -157,6 +157,13 @@ class ConversationStore:
 				),
 			)
 
+	def delete_recipe_imports(self, user_id: str, conversation_id: str) -> None:
+		with self.lock, self.connection:
+			self.connection.execute(
+				"DELETE FROM recipe_imports WHERE librechat_user_id=? AND conversation_id=?",
+				(user_id, conversation_id),
+			)
+
 	def close(self) -> None:
 		with self.lock:
 			self.connection.close()
