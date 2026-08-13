@@ -52,3 +52,8 @@ description: 童健云业务专用操作规范。处理健康数据、膳食营�
 - `days` 中每一天使用 `id`、`date`、`day` 和 `portions`；每个餐次使用 `slot`、`label`、`dishes`、`amountPerChild`、`totalAmount` 和 `dishIngredientRows`。
 - 每条 `dishIngredientRows` 使用 `dishName`、`ingredient`、`amount`、`unit`。不要提供 `dish_row_id` 或 `ingredient_row_id`，这两个字段由服务器生成。
 - 同一 `recipeId` 再次保存会原子替换该食谱的菜品和食材明细。调用前先查询是否已有记录，并在结果中明确报告是新建还是更新，以及保存后的天数、菜品数和食材数。
+
+## 已有食谱分析
+
+- 用户要求分析、重新分析、导出或下载已经导入或已经存在的食谱时，加载 `analyze-tongjianyun-recipe` Skill。
+- 分析必须使用 `frappe_generate_tongjianyun_recipe_analysis` 生成确定性 Excel 报告，不要由模型自行计算营养数据。

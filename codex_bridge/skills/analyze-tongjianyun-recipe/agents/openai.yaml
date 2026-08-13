@@ -1,0 +1,4 @@
+interface:
+  display_name: "食谱分析"
+  short_description: "分析童健云已导入或已存在食谱并生成可下载Excel报告"
+  default_prompt: "使用 $analyze-tongjianyun-recipe 分析童健云中已有食谱并提供报告下载链接。"
