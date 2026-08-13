@@ -58,6 +58,7 @@ _TOOL_LABELS = {
 	"frappe_create_document": "新增业务记录",
 	"frappe_update_document": "更新业务记录",
 	"frappe_upsert_tongjianyun_recipe": "保存童健云完整食谱",
+	"frappe_generate_tongjianyun_recipe_analysis": "生成食谱带量分析报告",
 	"frappe_list_attachments": "查询业务附件",
 	"frappe_attach_text_file": "保存文本附件",
 	"frappe_attach_word_file": "保存文档附件",
@@ -425,9 +426,13 @@ class CodexBridge:
 			return preview_text(draft)
 		if draft.get("status") == "committed":
 			result = draft.get("commit_result") or {}
-			return (
-				f"该食谱已经录入童健云，记录编号为 {result.get('name') or result.get('recipe_id') or '—'}。"
+			report = result.get("analysis_report") or {}
+			link = (
+				f"\n\n[下载食谱带量分析报告]({report.get('download_url')})"
+				if report.get("download_url")
+				else ""
 			)
+			return f"该食谱已经录入童健云，记录编号为 {result.get('name') or result.get('recipe_id') or '—'}。{link}"
 		stats = draft.get("stats") or {}
 		if int(stats.get("error_count") or 0):
 			return f"食谱导入任务 {draft.get('task_id')} 存在阻断错误，暂不能写入。\n\n{preview_text(draft)}"
@@ -471,7 +476,27 @@ class CodexBridge:
 				str(draft["task_id"]), status="failed", result=decoded
 			)
 			return "童健云写入后的回读数量与解析预览不一致，系统已标记为失败，请管理员检查数据。"
-		self.store.finish_recipe_import(str(draft["task_id"]), status="committed", result=decoded)
+		report = {}
+		try:
+			report_result = await proxy.call(
+				"frappe_generate_tongjianyun_recipe_analysis",
+				{"recipe_name": decoded.get("name") or decoded.get("recipe_id")},
+				identity=identity,
+			)
+			if report_result.get("success"):
+				report = decode_tool_result(report_result)
+		except Exception:
+			logger.exception("Recipe analysis workbook generation failed after a verified save")
+		commit_result = {**decoded, "analysis_report": report}
+		self.store.finish_recipe_import(str(draft["task_id"]), status="committed", result=commit_result)
+		report_lines = ""
+		if report.get("download_url"):
+			report_lines = (
+				f"\n- 分析标准：{(report.get('analysis') or {}).get('profile') or '学龄前儿童默认档案'}"
+				f"\n- [下载食谱带量分析报告]({report.get('download_url')})"
+			)
+		else:
+			report_lines = "\n- 食谱已保存；分析报告暂未生成，可稍后回复“生成食谱分析报告”重试。"
 		return (
 			f"食谱已准确录入童健云。\n\n"
 			f"- 食谱：{decoded.get('title') or (draft.get('recipe') or {}).get('title')}\n"
@@ -480,6 +505,7 @@ class CodexBridge:
 			f"{decoded.get('week_end') or expected.get('week_end')}\n"
 			f"- 已核验：{decoded.get('day_count')} 天、{decoded.get('dish_count')} 道菜、"
 			f"{decoded.get('ingredient_count')} 条食材明细"
+			f"{report_lines}"
 		)
 
 	async def _oracle_answer(

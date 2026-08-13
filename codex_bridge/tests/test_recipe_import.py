@@ -86,12 +86,25 @@ def test_real_compound_dish_names_are_split_only_at_dish_boundaries() -> None:
 
 def test_recipe_import_preview_then_confirmed_atomic_commit(tmp_path: Path) -> None:
 	class FakeProxy:
-		calls = 0
+		def __init__(self):
+			self.calls = 0
+			self.tools = []
 
 		async def call(self, tool, arguments, *, identity):
 			self.calls += 1
-			assert tool == "frappe_upsert_tongjianyun_recipe"
+			self.tools.append(tool)
 			assert identity.email == "owner@example.com"
+			if tool == "frappe_generate_tongjianyun_recipe_analysis":
+				assert arguments["recipe_name"] == "2026-W17"
+				result = {
+					"download_url": "https://child.example/private/files/食谱带量分析-2026-W17.xlsx",
+					"analysis": {"profile": "4-5岁儿童（男女平均）"},
+				}
+				return {
+					"success": True,
+					"contentItems": [{"type": "inputText", "text": json.dumps(result)}],
+				}
+			assert tool == "frappe_upsert_tongjianyun_recipe"
 			days = arguments["days"]
 			result = {
 				"name": arguments["recipe"]["recipeId"],
@@ -136,7 +149,12 @@ def test_recipe_import_preview_then_confirmed_atomic_commit(tmp_path: Path) -> N
 		assert proxy.calls == 0
 		committed = await bridge._recipe_import_answer("确认按当前解析结果录入食谱", **common)
 		assert "食谱已准确录入童健云" in committed
-		assert proxy.calls == 1
+		assert "下载食谱带量分析报告" in committed
+		assert proxy.calls == 2
+		assert proxy.tools == [
+			"frappe_upsert_tongjianyun_recipe",
+			"frappe_generate_tongjianyun_recipe_analysis",
+		]
 
 	asyncio.run(run_flow())
 	bridge.store.close()
