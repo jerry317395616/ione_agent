@@ -147,6 +147,57 @@ def test_oracle_browser_can_answer_without_site_identity(tmp_path) -> None:
 		bridge.close()
 
 
+def test_oracle_browser_loads_existing_recipe_analysis_skill(tmp_path) -> None:
+	class FakeProxy:
+		async def specs(self):
+			return [
+				{
+					"name": "frappe_generate_tongjianyun_recipe_analysis",
+					"description": "生成食谱分析报告",
+					"inputSchema": {"type": "object"},
+				}
+			]
+
+	class FakeOracle:
+		def __init__(self):
+			self.prompt = ""
+
+		async def ask(self, *, prompt, conversation_key):
+			self.prompt = prompt
+			return OracleBrowserResult('{"action":"reply","content":"请选择唯一食谱。"}')
+
+	settings = SimpleNamespace(
+		workspace_scope="site",
+		workspace_root=tmp_path,
+		data_dir=tmp_path,
+		oracle_browser_enabled=False,
+		oracle_browser_max_tool_rounds=3,
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_site_host="child.example",
+		identity_audience="child.example",
+	)
+	bridge = CodexBridge(settings, SimpleNamespace(dynamic_tool_proxy=FakeProxy()))
+	bridge.oracle_browser = FakeOracle()
+	try:
+		answer = asyncio.run(
+			bridge._oracle_answer(
+				ChatCompletionRequest(
+					messages=[{"role": "user", "content": "分析第十七周食谱并下载报告"}]
+				),
+				user_id="user",
+				conversation_id="conversation",
+				manager_user_email="owner@example.com",
+				manager_user_hint="Administrator",
+			)
+		)
+		assert answer == "请选择唯一食谱。"
+		assert "analyze-tongjianyun-recipe" in bridge.oracle_browser.prompt
+		assert "frappe_generate_tongjianyun_recipe_analysis" in bridge.oracle_browser.prompt
+		assert "不要让模型自行估算" in bridge.oracle_browser.prompt
+	finally:
+		bridge.close()
+
+
 def test_conversation_store_round_trip(tmp_path) -> None:
 	store = ConversationStore(tmp_path / "conversations.sqlite3")
 	assert store.get("user", "conversation") is None

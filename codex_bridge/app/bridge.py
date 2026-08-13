@@ -553,6 +553,7 @@ class CodexBridge:
 		tools_json = json.dumps(compact_tools, ensure_ascii=False, separators=(",", ":"))
 		if len(tools_json) > 19_000:
 			tools_json = tools_json[:19_000]
+		skill_context = self._oracle_skill_context(text)
 		conversation_key = self._oracle_conversation_key(user_id, conversation_id)
 		initial_prompt = f"""你是 child.myyr.top 的童健云业务智能助手，也是本轮任务的主推理模型。
 只处理当前登录用户有权限访问的 child 站点业务，默认用简体中文。
@@ -562,6 +563,7 @@ class CodexBridge:
 2. 调用工具：{{"action":"tool","tool":"工具名称","arguments":{{...}}}}
 一次只调用一个工具。工具返回后再判断下一步；不要自行生成 actor_token，也不要询问或泄露凭据、内部地址和部署细节。
 允许的工具：{tools_json}
+{skill_context}
 
 用户请求：{text}"""
 		lock_key = f"{user_id}\0{conversation_id}"
@@ -604,6 +606,34 @@ class CodexBridge:
 结果：{tool_payload}
 请继续处理。仍然只返回一个 JSON 对象：需要下一工具时返回 action=tool；任务完成时返回 action=reply，并在最终回答中准确说明已完成和未完成的事项。"""
 		raise OracleBrowserError("Oracle browser did not finish the request")
+
+	@staticmethod
+	def _oracle_skill_context(text: str) -> str:
+		"""Load the existing-recipe analysis Skill for the browser-model path."""
+
+		if "食谱" not in text or not any(
+			marker in text
+			for marker in ("分析", "重新分析", "带量", "营养", "导出", "下载", "报告", "风险")
+		):
+			return ""
+		skill_dir = (
+			Path(__file__).resolve().parents[1]
+			/ "skills"
+			/ "analyze-tongjianyun-recipe"
+		)
+		parts = []
+		for path in (skill_dir / "SKILL.md", skill_dir / "references" / "analysis-contract.md"):
+			try:
+				parts.append(path.read_text(encoding="utf-8"))
+			except OSError:
+				continue
+		if not parts:
+			return ""
+		return (
+			"\n本次请求必须执行 I-ONE Agent Skill `analyze-tongjianyun-recipe`。"
+			"以下规范优先于一般业务判断：\n"
+			+ "\n\n".join(parts)
+		)
 
 	async def _thread(self, user_id: str, conversation_id: str) -> str:
 		thread_id = self.store.get(user_id, conversation_id)
