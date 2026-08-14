@@ -63,6 +63,9 @@ _TOOL_LABELS = {
 	"frappe_attach_text_file": "保存文本附件",
 	"frappe_attach_word_file": "保存文档附件",
 	"frappe_read_word_attachment": "读取文档附件",
+	"frappe_stage_spreadsheet_attachment": "读取电子表格附件",
+	"officecli_xlsx": "处理电子表格",
+	"frappe_publish_spreadsheet_attachment": "上传电子表格附件",
 	"frappe_create_crm_lead_package": "创建客户业务资料",
 	"frappe_convert_lead_to_deal": "转换客户商机",
 	"frappe_upsert_deal_presentation": "生成客户演示文稿",
@@ -462,9 +465,7 @@ class CodexBridge:
 		)
 		decoded = decode_tool_result(result)
 		if not result.get("success") or not decoded:
-			self.store.finish_recipe_import(
-				str(draft["task_id"]), status="failed", result=decoded or result
-			)
+			self.store.finish_recipe_import(str(draft["task_id"]), status="failed", result=decoded or result)
 			return "食谱解析结果已保留，但本次写入失败。没有返回可核验的童健云记录，请稍后重试。"
 		expected = draft.get("stats") or {}
 		mismatches = []
@@ -472,9 +473,7 @@ class CodexBridge:
 			if int(decoded.get(count_field) or -1) != int(expected.get(count_field) or 0):
 				mismatches.append(count_field)
 		if mismatches:
-			self.store.finish_recipe_import(
-				str(draft["task_id"]), status="failed", result=decoded
-			)
+			self.store.finish_recipe_import(str(draft["task_id"]), status="failed", result=decoded)
 			return "童健云写入后的回读数量与解析预览不一致，系统已标记为失败，请管理员检查数据。"
 		report = {}
 		try:
@@ -541,19 +540,37 @@ class CodexBridge:
 			audience=self.settings.identity_audience,
 			site_host=self.settings.frappe_site_host,
 		)
+		skill_context = self._oracle_skill_context(text)
 		tool_specs = await proxy.specs()
-		compact_tools = [
-			{
+		priority_names = (
+			(
+				"frappe_list_documents",
+				"frappe_get_document",
+				"frappe_list_attachments",
+				"frappe_stage_spreadsheet_attachment",
+				"officecli_xlsx",
+				"frappe_publish_spreadsheet_attachment",
+			)
+			if "frappe-spreadsheets" in skill_context
+			else ()
+		)
+		priority = {name: index for index, name in enumerate(priority_names)}
+		ordered_specs = sorted(
+			tool_specs,
+			key=lambda spec: (priority.get(str(spec.get("name") or ""), len(priority)),),
+		)
+		compact_tools = []
+		for spec in ordered_specs:
+			candidate = {
 				"name": spec.get("name"),
 				"description": spec.get("description"),
 				"parameters": spec.get("inputSchema") or {"type": "object"},
 			}
-			for spec in tool_specs
-		]
+			trial = json.dumps([*compact_tools, candidate], ensure_ascii=False, separators=(",", ":"))
+			if len(trial) > 19_000:
+				continue
+			compact_tools.append(candidate)
 		tools_json = json.dumps(compact_tools, ensure_ascii=False, separators=(",", ":"))
-		if len(tools_json) > 19_000:
-			tools_json = tools_json[:19_000]
-		skill_context = self._oracle_skill_context(text)
 		conversation_key = self._oracle_conversation_key(user_id, conversation_id)
 		initial_prompt = f"""你是 child.myyr.top 的童健云业务智能助手，也是本轮任务的主推理模型。
 只处理当前登录用户有权限访问的 child 站点业务，默认用简体中文。
@@ -597,7 +614,9 @@ class CodexBridge:
 					continue
 				if progress is not None:
 					await progress.put(f"- 正在{_tool_label(tool)}。\n")
-				tool_result = await proxy.call(tool, arguments, identity=identity)
+				tool_result = await proxy.call(
+					tool, arguments, identity=identity, workspace=self.workspace_for(user_id)
+				)
 				tool_payload = json.dumps(tool_result, ensure_ascii=False, separators=(",", ":"))
 				if len(tool_payload) > 20_000:
 					tool_payload = f"{tool_payload[:20_000]}…"
@@ -609,20 +628,36 @@ class CodexBridge:
 
 	@staticmethod
 	def _oracle_skill_context(text: str) -> str:
-		"""Load the existing-recipe analysis Skill for the browser-model path."""
+		"""Load the matching bundled Skill for the browser-model path."""
 
-		if "食谱" not in text or not any(
-			marker in text
-			for marker in ("分析", "重新分析", "带量", "营养", "导出", "下载", "报告", "风险")
-		):
-			return ""
-		skill_dir = (
-			Path(__file__).resolve().parents[1]
-			/ "skills"
-			/ "analyze-tongjianyun-recipe"
+		spreadsheet_markers = (
+			".xlsx",
+			"Excel",
+			"excel",
+			"Sheet",
+			"sheet",
+			"工作簿",
+			"电子表格",
+			"表格附件",
+			"增加一个表",
+			"增加一页",
+			"修改表格",
 		)
+		if any(marker in text for marker in spreadsheet_markers):
+			skill_name = "frappe-spreadsheets"
+			reference_name = "tool-contract.md"
+		else:
+			if "食谱" not in text or not any(
+				marker in text
+				for marker in ("分析", "重新分析", "带量", "营养", "导出", "下载", "报告", "风险")
+			):
+				return ""
+			skill_name = "analyze-tongjianyun-recipe"
+			reference_name = "analysis-contract.md"
+
+		skill_dir = Path(__file__).resolve().parents[1] / "skills" / skill_name
 		parts = []
-		for path in (skill_dir / "SKILL.md", skill_dir / "references" / "analysis-contract.md"):
+		for path in (skill_dir / "SKILL.md", skill_dir / "references" / reference_name):
 			try:
 				parts.append(path.read_text(encoding="utf-8"))
 			except OSError:
@@ -630,9 +665,8 @@ class CodexBridge:
 		if not parts:
 			return ""
 		return (
-			"\n本次请求必须执行 I-ONE Agent Skill `analyze-tongjianyun-recipe`。"
-			"以下规范优先于一般业务判断：\n"
-			+ "\n\n".join(parts)
+			f"\n本次请求必须执行 I-ONE Agent Skill `{skill_name}`。"
+			"以下规范优先于一般业务判断：\n" + "\n\n".join(parts)
 		)
 
 	async def _thread(self, user_id: str, conversation_id: str) -> str:
@@ -692,7 +726,9 @@ class CodexBridge:
 		async with self.locks[lock_key]:
 			thread_id = await self._thread(user_id, conversation_id)
 			turn_id = ""
-			self.app_server.bind_tool_identity(thread_id, identity)
+			self.app_server.bind_tool_identity(
+				thread_id, identity, workspace=str(self.workspace_for(user_id))
+			)
 			try:
 				async with self.app_server.subscribe(thread_id) as queue:
 					result = await self.app_server.request(

@@ -8,8 +8,10 @@ and systemd from the host rather than exposing the Docker socket to Frappe.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import platform
 import re
 import secrets
 import subprocess
@@ -22,6 +24,17 @@ from pathlib import Path
 SITE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
 ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
+OFFICECLI_VERSION = "v1.0.144"
+OFFICECLI_LINUX_ASSETS = {
+	"x86_64": (
+		"officecli-linux-x64",
+		"32ef7a21a54a4ca6c9806bf5e9f3d32bfb1291017329c55044cb2aac71822eb8",
+	),
+	"aarch64": (
+		"officecli-linux-arm64",
+		"56ec2c3114b66f6490888b6778cbb8413a65911a26cacc7207f29e13424966da",
+	),
+}
 
 COMMON_BRIDGE_ENV = {
 	"DEEPSEEK_API_BASE",
@@ -36,6 +49,12 @@ COMMON_BRIDGE_ENV = {
 	"IONE_CODEX_RPC_TIMEOUT_SECONDS",
 	"IONE_CODEX_MESSAGE_LIMIT_BYTES",
 	"IONE_CODEX_KEEPALIVE_SECONDS",
+	"IONE_OFFICECLI_BIN",
+	"IONE_ORACLE_BROWSER_ENABLED",
+	"IONE_ORACLE_BROWSER_MAX_TOOL_ROUNDS",
+	"IONE_ORACLE_BROWSER_TIMEOUT_SECONDS",
+	"IONE_ORACLE_BROWSER_TOKEN",
+	"IONE_ORACLE_BROWSER_URL",
 }
 
 
@@ -112,6 +131,54 @@ def atomic_write(path: Path, content: str, mode: int) -> None:
 	os.replace(temporary, path)
 
 
+def ensure_officecli(
+	path: Path,
+	*,
+	version: str = OFFICECLI_VERSION,
+	downloader=urllib.request.urlopen,
+) -> str:
+	"""Install a pinned OfficeCLI release atomically after SHA-256 verification."""
+	machine = platform.machine().lower()
+	if machine == "amd64":
+		machine = "x86_64"
+	if machine == "arm64":
+		machine = "aarch64"
+	if machine not in OFFICECLI_LINUX_ASSETS:
+		raise RuntimeError(f"OfficeCLI does not support this server architecture: {machine}")
+	asset, expected_sha256 = OFFICECLI_LINUX_ASSETS[machine]
+	if path.is_file():
+		try:
+			installed = run([str(path), "--version"], capture=True)
+			if version.lstrip("v") in installed:
+				return installed
+		except (OSError, subprocess.CalledProcessError):
+			pass
+	urls = (
+		f"https://d.officecli.ai/releases/download/{version}/{asset}",
+		f"https://github.com/iOfficeAI/OfficeCLI/releases/download/{version}/{asset}",
+	)
+	payload = b""
+	last_error: Exception | None = None
+	for url in urls:
+		try:
+			with downloader(url, timeout=120) as response:
+				payload = response.read()
+			break
+		except (OSError, urllib.error.URLError) as exc:
+			last_error = exc
+	if not payload:
+		raise RuntimeError("Unable to download the pinned OfficeCLI release") from last_error
+	actual_sha256 = hashlib.sha256(payload).hexdigest()
+	if actual_sha256 != expected_sha256:
+		raise RuntimeError("OfficeCLI SHA-256 verification failed")
+	path.parent.mkdir(parents=True, exist_ok=True)
+	temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+	temporary.write_bytes(payload)
+	os.chmod(temporary, 0o755)
+	os.replace(temporary, path)
+	return run([str(path), "--version"], capture=True)
+
+
 def ensure_repo(path: Path, repository: str, branch: str, owner: str) -> str:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	if not (path / ".git").is_dir():
@@ -124,7 +191,9 @@ def ensure_repo(path: Path, repository: str, branch: str, owner: str) -> str:
 
 
 def compose_command(bench: Path, *arguments: str, capture: bool = False) -> str:
-	return run(["docker", "compose", "-f", str(bench / "compose.yaml"), *arguments], cwd=bench, capture=capture)
+	return run(
+		["docker", "compose", "-f", str(bench / "compose.yaml"), *arguments], cwd=bench, capture=capture
+	)
 
 
 def installed_apps(bench: Path, site: str) -> set[str]:
@@ -416,6 +485,7 @@ def main() -> int:
 	parser.add_argument("--librechat-repository", default="git@github.com:jerry317395616/LibreChat.git")
 	parser.add_argument("--librechat-branch", default="main")
 	parser.add_argument("--ione-agent-source", type=Path, default=Path("/opt/ione-codex-agent/current"))
+	parser.add_argument("--officecli-bin", type=Path, default=Path("/opt/ione-codex-agent/bin/officecli"))
 	parser.add_argument("--base-bridge-env", type=Path, default=Path("/etc/ione-codex-agent.env"))
 	parser.add_argument("--instance-root", type=Path, default=Path("/home/zyd/services/ione-site-stacks"))
 	parser.add_argument("--bridge-data-root", type=Path, default=Path("/var/lib/ione-site-stacks"))
@@ -540,10 +610,17 @@ def main() -> int:
 			"IONE_FRAPPE_MCP_URL": f"https://{site}/api/method/ione_core.mcp.server.handle_mcp",
 			"IONE_FRAPPE_DYNAMIC_TOOLS": "1",
 			"IONE_MANAGER_IDENTITY_SECRET": identity_secret,
+			"IONE_OFFICECLI_BIN": str(args.officecli_bin),
 		}
 	)
+	officecli_version = ensure_officecli(args.officecli_bin)
 	atomic_write(bridge_env_path, env_text(bridge_env), 0o600)
-	for directory in (bridge_data, bridge_data / "data", bridge_data / "codex-home", bridge_data / "workspaces"):
+	for directory in (
+		bridge_data,
+		bridge_data / "data",
+		bridge_data / "codex-home",
+		bridge_data / "workspaces",
+	):
 		directory.mkdir(parents=True, exist_ok=True)
 	run(["chown", "-R", "ioneagent:ioneagent", str(bridge_data), str(bridge_env_path.parent)])
 
@@ -582,6 +659,7 @@ def main() -> int:
 				"librechat_commit": commit,
 				"librechat_service": librechat_unit,
 				"bridge_service": bridge_unit,
+				"officecli_version": officecli_version,
 				"status": "healthy",
 			},
 			ensure_ascii=False,

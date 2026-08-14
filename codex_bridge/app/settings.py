@@ -47,6 +47,9 @@ When the manager Frappe MCP server is available, use its permission-aware tools 
 When the user asks for a Tongjianyun recipe nutrition or weighted-food analysis, call
 frappe_generate_tongjianyun_recipe_analysis with the exact recipe name and return its download_url.
 Nutrition calculations must come from that deterministic report tool; never invent nutrient values.
+When the user asks to inspect, extend or redesign an existing Excel workbook, use the
+frappe-spreadsheets Skill and its stage, OfficeCLI and publish tools. Return a real .xlsx attachment;
+never replace a requested workbook with text, CSV, JSON or a description of multiple sheets.
 Load the matching business Skill before a multi-step CRM, ERPNext, Wiki or medical-insurance task.
 Inspect DocType metadata before writing unfamiliar records. Create or update drafts only, then read back
 the saved document and report its exact DocType and name. Never imply that a document was submitted,
@@ -84,6 +87,7 @@ class Settings:
 	model_provider: str
 	model_context_window: int
 	codex_bin: Path
+	officecli_bin: Path
 	codex_home: Path
 	data_dir: Path
 	workspace_root: Path
@@ -136,13 +140,26 @@ class Settings:
 				min(4_000_000, int(os.getenv("IONE_CODEX_MODEL_CONTEXT_WINDOW", "1000000"))),
 			),
 			codex_bin=Path(required("IONE_CODEX_BIN")).expanduser().resolve(),
-			codex_home=Path(os.getenv("IONE_CODEX_HOME", "~/.local/share/ione-codex-agent/codex-home")).expanduser().resolve(),
-			data_dir=Path(os.getenv("IONE_CODEX_DATA_DIR", "~/.local/share/ione-codex-agent/data")).expanduser().resolve(),
-			workspace_root=Path(os.getenv("IONE_CODEX_WORKSPACE_ROOT", "~/.local/share/ione-codex-agent/workspaces")).expanduser().resolve(),
+			officecli_bin=Path(os.getenv("IONE_OFFICECLI_BIN", "/opt/ione-codex-agent/bin/officecli"))
+			.expanduser()
+			.resolve(),
+			codex_home=Path(os.getenv("IONE_CODEX_HOME", "~/.local/share/ione-codex-agent/codex-home"))
+			.expanduser()
+			.resolve(),
+			data_dir=Path(os.getenv("IONE_CODEX_DATA_DIR", "~/.local/share/ione-codex-agent/data"))
+			.expanduser()
+			.resolve(),
+			workspace_root=Path(
+				os.getenv("IONE_CODEX_WORKSPACE_ROOT", "~/.local/share/ione-codex-agent/workspaces")
+			)
+			.expanduser()
+			.resolve(),
 			workspace_scope=workspace_scope,
 			sandbox=sandbox,
 			network_access=as_bool("IONE_CODEX_NETWORK_ACCESS", True),
-			developer_instructions=os.getenv("IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS).strip(),
+			developer_instructions=os.getenv(
+				"IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS
+			).strip(),
 			request_timeout_seconds=max(5, min(120, int(os.getenv("IONE_CODEX_RPC_TIMEOUT_SECONDS", "30")))),
 			app_server_message_limit_bytes=max(
 				1024 * 1024,
@@ -161,9 +178,9 @@ class Settings:
 			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
 			identity_audience=identity_audience,
 			oracle_browser_enabled=as_bool("IONE_ORACLE_BROWSER_ENABLED", False),
-			oracle_browser_url=os.getenv(
-				"IONE_ORACLE_BROWSER_URL", "http://127.0.0.1:9474"
-			).strip().rstrip("/"),
+			oracle_browser_url=os.getenv("IONE_ORACLE_BROWSER_URL", "http://127.0.0.1:9474")
+			.strip()
+			.rstrip("/"),
 			oracle_browser_token=os.getenv("IONE_ORACLE_BROWSER_TOKEN", "").strip(),
 			oracle_browser_timeout_seconds=max(
 				30,
@@ -171,7 +188,7 @@ class Settings:
 			),
 			oracle_browser_max_tool_rounds=max(
 				1,
-				min(8, int(os.getenv("IONE_ORACLE_BROWSER_MAX_TOOL_ROUNDS", "5"))),
+				min(8, int(os.getenv("IONE_ORACLE_BROWSER_MAX_TOOL_ROUNDS", "8"))),
 			),
 		)
 
@@ -218,7 +235,7 @@ class Settings:
 			encoding="utf-8",
 		)
 		catalog_path.chmod(0o600)
-		config = f'''model = {json.dumps(self.model)}
+		config = f"""model = {json.dumps(self.model)}
 model_provider = {json.dumps(self.model_provider)}
 model_catalog_json = {json.dumps(str(catalog_path))}
 approval_policy = "never"
@@ -251,7 +268,7 @@ wire_api = "responses"
 request_max_retries = 3
 stream_max_retries = 3
 stream_idle_timeout_ms = 300000
-'''
+"""
 		if self.mcp_enabled and not self.frappe_dynamic_tools:
 			enabled_tools = self.frappe_mcp_enabled_tools or DEFAULT_MCP_TOOLS
 			if any(not tool.replace("_", "").isalnum() for tool in enabled_tools):
@@ -261,7 +278,7 @@ stream_idle_timeout_ms = 300000
 			if self.frappe_site_host:
 				env_headers.append('Host = "IONE_FRAPPE_SITE_HOST"')
 			env_headers_toml = ", ".join(env_headers)
-			config += f'''
+			config += f"""
 
 [mcp_servers.manager]
 url = {json.dumps(self.frappe_mcp_url)}
@@ -274,7 +291,7 @@ default_tools_approval_mode = "auto"
 enabled_tools = [
 {enabled_tools_toml}
 ]
-'''
+"""
 		config_path = self.codex_home / "config.toml"
 		config_path.write_text(config, encoding="utf-8")
 		config_path.chmod(0o600)
@@ -338,6 +355,7 @@ enabled_tools = [
 				"CODEX_HOME": str(self.codex_home),
 				"DEEPSEEK_API_KEY": self.deepseek_api_key,
 				"HOME": str(self.codex_home.parent),
+				"IONE_OFFICECLI_BIN": str(self.officecli_bin),
 			}
 		)
 		if self.frappe_auth_header:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frappe 电子表格"
+  short_description: "编辑、分析并回传 Frappe 中的 Excel 附件"
+  default_prompt: "使用 $frappe-spreadsheets 读取 Frappe 文档中的 Excel 附件，按用户要求修改和验证后作为私有附件回传。"

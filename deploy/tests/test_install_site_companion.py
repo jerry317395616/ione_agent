@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -52,6 +54,66 @@ def test_existing_site_model_settings_override_host_defaults() -> None:
 	}
 
 	assert installer.common_bridge_env(base, existing) == existing
+
+
+def test_ensure_officecli_verifies_and_installs_pinned_binary(tmp_path: Path) -> None:
+	payload = b"pinned-officecli"
+	path = tmp_path / "bin" / "officecli"
+
+	class Response(io.BytesIO):
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *_args):
+			self.close()
+
+	with (
+		patch.object(installer.platform, "machine", return_value="x86_64"),
+		patch.dict(
+			installer.OFFICECLI_LINUX_ASSETS,
+			{"x86_64": ("officecli-linux-x64", installer.hashlib.sha256(payload).hexdigest())},
+		),
+		patch.object(installer, "run", return_value="OfficeCLI 1.0.144"),
+	):
+		version = installer.ensure_officecli(path, downloader=lambda *_args, **_kwargs: Response(payload))
+
+	assert version == "OfficeCLI 1.0.144"
+	assert path.read_bytes() == payload
+
+
+def test_ensure_officecli_falls_back_to_github(tmp_path: Path) -> None:
+	payload = b"pinned-officecli"
+	path = tmp_path / "bin" / "officecli"
+	urls: list[str] = []
+
+	class Response(io.BytesIO):
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *_args):
+			self.close()
+
+	def downloader(url: str, **_kwargs):
+		urls.append(url)
+		if url.startswith("https://d.officecli.ai/"):
+			raise installer.urllib.error.URLError("mirror unavailable")
+		return Response(payload)
+
+	with (
+		patch.object(installer.platform, "machine", return_value="x86_64"),
+		patch.dict(
+			installer.OFFICECLI_LINUX_ASSETS,
+			{"x86_64": ("officecli-linux-x64", installer.hashlib.sha256(payload).hexdigest())},
+		),
+		patch.object(installer, "run", return_value="OfficeCLI 1.0.144"),
+	):
+		installer.ensure_officecli(path, downloader=downloader)
+
+	assert urls == [
+		"https://d.officecli.ai/releases/download/v1.0.144/officecli-linux-x64",
+		"https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.144/officecli-linux-x64",
+	]
+	assert path.read_bytes() == payload
 
 
 def test_parse_credentials_uses_last_payload() -> None:

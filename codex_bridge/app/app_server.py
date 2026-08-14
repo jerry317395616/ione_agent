@@ -36,6 +36,7 @@ class CodexAppServer:
 		self.subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
 		self.loaded_threads: set[str] = set()
 		self.active_tool_identities: dict[str, ToolIdentity] = {}
+		self.active_tool_workspaces: dict[str, str] = {}
 		self.generation = 0
 		self.dynamic_tool_proxy = (
 			DynamicToolProxy(settings)
@@ -99,6 +100,7 @@ class CodexAppServer:
 		self.reader_task = None
 		self.stderr_task = None
 		self.active_tool_identities.clear()
+		self.active_tool_workspaces.clear()
 		for task in (reader_task, stderr_task):
 			if task and task is not asyncio.current_task():
 				task.cancel()
@@ -227,6 +229,9 @@ class CodexAppServer:
 					tool,
 					arguments,
 					identity=identity,
+					workspace=getattr(self, "active_tool_workspaces", {}).get(
+						str(params.get("threadId") or "")
+					),
 				)
 			await self._publish(
 				{
@@ -277,17 +282,27 @@ class CodexAppServer:
 			if not future.done():
 				future.set_exception(error)
 
-	def bind_tool_identity(self, thread_id: str, identity: ToolIdentity | None) -> None:
+	def bind_tool_identity(
+		self, thread_id: str, identity: ToolIdentity | None, *, workspace: str | None = None
+	) -> None:
 		"""Bind an identity to one active thread without persisting credentials."""
+		if not hasattr(self, "active_tool_workspaces"):
+			self.active_tool_workspaces = {}
 		if identity is None:
 			self.active_tool_identities.pop(thread_id, None)
+			self.active_tool_workspaces.pop(thread_id, None)
 		else:
 			self.active_tool_identities[thread_id] = identity
+			if workspace:
+				self.active_tool_workspaces[thread_id] = workspace
 
 	def clear_tool_identity(self, thread_id: str, identity: ToolIdentity | None) -> None:
 		"""Clear only the binding owned by the completing turn."""
+		if not hasattr(self, "active_tool_workspaces"):
+			self.active_tool_workspaces = {}
 		if self.active_tool_identities.get(thread_id) is identity:
 			self.active_tool_identities.pop(thread_id, None)
+			self.active_tool_workspaces.pop(thread_id, None)
 
 	@asynccontextmanager
 	async def subscribe(self, thread_id: str) -> AsyncIterator[asyncio.Queue]:

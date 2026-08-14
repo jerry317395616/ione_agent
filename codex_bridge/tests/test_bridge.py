@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import subprocess
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.app_server import CodexAppServer
@@ -34,9 +36,7 @@ def test_latest_user_text_handles_text_parts() -> None:
 
 
 def test_parse_oracle_action_accepts_fenced_json() -> None:
-	action = parse_oracle_action(
-		'```json\n{"action":"tool","tool":"frappe_get_context","arguments":{}}\n```'
-	)
+	action = parse_oracle_action('```json\n{"action":"tool","tool":"frappe_get_context","arguments":{}}\n```')
 	assert action == {
 		"action": "tool",
 		"tool": "frappe_get_context",
@@ -59,10 +59,11 @@ def test_oracle_browser_drives_permission_aware_tool_then_replies(tmp_path) -> N
 				}
 			]
 
-		async def call(self, tool, arguments, *, identity):
+		async def call(self, tool, arguments, *, identity, workspace=None):
 			assert tool == "frappe_get_context"
 			assert arguments == {}
 			assert identity == ToolIdentity("owner@example.com", "Administrator", "child.example")
+			assert workspace == tmp_path
 			return {
 				"contentItems": [{"type": "inputText", "text": '{"site":"child.example"}'}],
 				"success": True,
@@ -76,9 +77,7 @@ def test_oracle_browser_drives_permission_aware_tool_then_replies(tmp_path) -> N
 			self.prompts.append(prompt)
 			assert conversation_key.startswith("child-")
 			if len(self.prompts) == 1:
-				return OracleBrowserResult(
-					'{"action":"tool","tool":"frappe_get_context","arguments":{}}'
-				)
+				return OracleBrowserResult('{"action":"tool","tool":"frappe_get_context","arguments":{}}')
 			return OracleBrowserResult('{"action":"reply","content":"当前站点为 child.example。"}')
 
 	settings = SimpleNamespace(
@@ -181,9 +180,7 @@ def test_oracle_browser_loads_existing_recipe_analysis_skill(tmp_path) -> None:
 	try:
 		answer = asyncio.run(
 			bridge._oracle_answer(
-				ChatCompletionRequest(
-					messages=[{"role": "user", "content": "分析第十七周食谱并下载报告"}]
-				),
+				ChatCompletionRequest(messages=[{"role": "user", "content": "分析第十七周食谱并下载报告"}]),
 				user_id="user",
 				conversation_id="conversation",
 				manager_user_email="owner@example.com",
@@ -194,6 +191,57 @@ def test_oracle_browser_loads_existing_recipe_analysis_skill(tmp_path) -> None:
 		assert "analyze-tongjianyun-recipe" in bridge.oracle_browser.prompt
 		assert "frappe_generate_tongjianyun_recipe_analysis" in bridge.oracle_browser.prompt
 		assert "不要让模型自行估算" in bridge.oracle_browser.prompt
+	finally:
+		bridge.close()
+
+
+def test_oracle_browser_loads_spreadsheet_skill_for_custom_workbook_change(tmp_path) -> None:
+	class FakeProxy:
+		async def specs(self):
+			return [
+				{
+					"name": "officecli_xlsx",
+					"description": "处理电子表格",
+					"inputSchema": {"type": "object"},
+				}
+			]
+
+	class FakeOracle:
+		def __init__(self):
+			self.prompt = ""
+
+		async def ask(self, *, prompt, conversation_key):
+			self.prompt = prompt
+			return OracleBrowserResult('{"action":"reply","content":"准备处理。"}')
+
+	settings = SimpleNamespace(
+		workspace_scope="site",
+		workspace_root=tmp_path,
+		data_dir=tmp_path,
+		oracle_browser_enabled=False,
+		oracle_browser_max_tool_rounds=8,
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_site_host="child.example",
+		identity_audience="child.example",
+	)
+	bridge = CodexBridge(settings, SimpleNamespace(dynamic_tool_proxy=FakeProxy()))
+	bridge.oracle_browser = FakeOracle()
+	try:
+		answer = asyncio.run(
+			bridge._oracle_answer(
+				ChatCompletionRequest(
+					messages=[{"role": "user", "content": "给食谱分析 Excel 再增加一个 Sheet"}]
+				),
+				user_id="user",
+				conversation_id="conversation",
+				manager_user_email="owner@example.com",
+				manager_user_hint="Administrator",
+			)
+		)
+		assert answer == "准备处理。"
+		assert "frappe-spreadsheets" in bridge.oracle_browser.prompt
+		assert "真实 `.xlsx`" in bridge.oracle_browser.prompt
+		assert "officecli_xlsx" in bridge.oracle_browser.prompt
 	finally:
 		bridge.close()
 
@@ -316,12 +364,7 @@ def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None
 	assert (settings.codex_home / "skills" / "lead-proposal-to-deal" / "SKILL.md").is_file()
 	assert (settings.codex_home / "skills" / "deal-proposal-to-slides" / "SKILL.md").is_file()
 	assert (settings.codex_home / "skills" / "deal-materials-to-promo-video" / "SKILL.md").is_file()
-	assert (
-		settings.codex_home
-		/ "skills"
-		/ "analyze-tongjianyun-recipe"
-		/ "SKILL.md"
-	).is_file()
+	assert (settings.codex_home / "skills" / "analyze-tongjianyun-recipe" / "SKILL.md").is_file()
 	assert '"frappe_list_attachments"' in config
 	assert '"frappe_get_site_catalog"' in config
 	assert '"frappe_attach_word_file"' in config
@@ -391,6 +434,7 @@ def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None
 		frappe_auth_header="token key:secret",
 		frappe_site_host="child.example",
 		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
+		officecli_bin=Path("missing-officecli"),
 	)
 	proxy = DynamicToolProxy(settings)
 
@@ -435,6 +479,147 @@ def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None
 		assert denied["success"] is False
 
 	asyncio.run(probe())
+
+
+def test_dynamic_spreadsheet_tools_keep_binary_out_of_model_context(monkeypatch, tmp_path) -> None:
+	workspace = tmp_path / "workspaces"
+	workspace.mkdir()
+	officecli = tmp_path / "officecli"
+	officecli.write_text("binary", encoding="utf-8")
+	settings = SimpleNamespace(
+		frappe_mcp_enabled_tools=(),
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_auth_header="token key:secret",
+		frappe_site_host="child.example",
+		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
+		officecli_bin=officecli,
+		workspace_root=workspace,
+	)
+	proxy = DynamicToolProxy(settings)
+	spreadsheet_bytes = b"PK\x03\x04-private-workbook"
+	uploaded = {}
+
+	def fake_rpc(method, params):
+		if method == "tools/list":
+			return {
+				"tools": [
+					{
+						"name": "frappe_read_spreadsheet_attachment",
+						"inputSchema": {"type": "object"},
+					},
+					{
+						"name": "frappe_attach_spreadsheet_file",
+						"inputSchema": {"type": "object"},
+					},
+				]
+			}
+		if params["name"] == "frappe_read_spreadsheet_attachment":
+			return {
+				"structuredContent": {
+					"result": {
+						"file_name": "report.xlsx",
+						"content_base64": base64.b64encode(spreadsheet_bytes).decode("ascii"),
+					}
+				}
+			}
+		assert params["name"] == "frappe_attach_spreadsheet_file"
+		uploaded.update(params["arguments"])
+		return {
+			"structuredContent": {
+				"result": {"file_name": "report-custom.xlsx", "file": "/private/files/report.xlsx"}
+			}
+		}
+
+	monkeypatch.setattr(proxy, "_rpc", fake_rpc)
+	identity = ToolIdentity("owner@example.com", "Administrator", "child.example")
+
+	async def probe():
+		specs = await proxy.specs()
+		names = {spec["name"] for spec in specs}
+		assert "frappe_read_spreadsheet_attachment" not in names
+		assert "frappe_attach_spreadsheet_file" not in names
+		assert {
+			"frappe_stage_spreadsheet_attachment",
+			"officecli_xlsx",
+			"frappe_publish_spreadsheet_attachment",
+		}.issubset(names)
+
+		staged = await proxy.call(
+			"frappe_stage_spreadsheet_attachment",
+			{"doctype": "Tongjianyun Recipe", "document_name": "2026-W17", "file_name": "report.xlsx"},
+			identity=identity,
+			workspace=workspace,
+		)
+		staged_text = staged["contentItems"][0]["text"]
+		assert "content_base64" not in staged_text
+		assert base64.b64encode(spreadsheet_bytes).decode("ascii") not in staged_text
+		assert json.loads(staged_text)["local_path"] == "spreadsheets/report.xlsx"
+		actor_workspace = proxy._workspace_root(workspace, identity)
+		assert (actor_workspace / "spreadsheets" / "report.xlsx").read_bytes() == spreadsheet_bytes
+
+		published = await proxy.call(
+			"frappe_publish_spreadsheet_attachment",
+			{
+				"doctype": "Tongjianyun Recipe",
+				"document_name": "2026-W17",
+				"local_path": "spreadsheets/report.xlsx",
+				"file_name": "report-custom.xlsx",
+			},
+			identity=identity,
+			workspace=workspace,
+		)
+		assert published["success"] is True
+
+		other_user = ToolIdentity("other@example.com", "Other User", "child.example")
+		isolated = await proxy.call(
+			"frappe_publish_spreadsheet_attachment",
+			{
+				"doctype": "Tongjianyun Recipe",
+				"document_name": "2026-W17",
+				"local_path": "spreadsheets/report.xlsx",
+			},
+			identity=other_user,
+			workspace=workspace,
+		)
+		assert isolated["success"] is False
+
+	asyncio.run(probe())
+	assert base64.b64decode(uploaded["content_base64"]) == spreadsheet_bytes
+
+
+def test_officecli_tool_rejects_paths_outside_workspace(monkeypatch, tmp_path) -> None:
+	officecli = tmp_path / "officecli"
+	officecli.write_text("binary", encoding="utf-8")
+	workspace = tmp_path / "workspaces"
+	workspace.mkdir()
+	settings = SimpleNamespace(
+		frappe_mcp_enabled_tools=(),
+		frappe_mcp_url="http://127.0.0.1:17080/api/mcp",
+		frappe_auth_header="token key:secret",
+		frappe_site_host="child.example",
+		identity_shared_secret="identity-secret-longer-than-thirty-two-characters",
+		officecli_bin=officecli,
+		workspace_root=workspace,
+	)
+	proxy = DynamicToolProxy(settings)
+	proxy._specs = [{"name": "officecli_xlsx"}]
+	proxy._tool_names = {"officecli_xlsx"}
+	monkeypatch.setattr(
+		subprocess,
+		"run",
+		lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not execute")),
+	)
+	identity = ToolIdentity("owner@example.com", "Administrator", "child.example")
+	result = asyncio.run(
+		proxy.call(
+			"officecli_xlsx",
+			{"command": "validate ../private.xlsx"},
+			identity=identity,
+			workspace=workspace,
+		)
+	)
+	assert result["success"] is False
+	assert "超出工作目录" in result["contentItems"][0]["text"]
 
 
 def test_stream_chunk_is_openai_compatible() -> None:
@@ -569,6 +754,7 @@ def test_dynamic_tool_proxy_issues_token_at_each_call(monkeypatch) -> None:
 def test_app_server_clears_only_owned_thread_identity() -> None:
 	server = object.__new__(CodexAppServer)
 	server.active_tool_identities = {}
+	server.active_tool_workspaces = {}
 	first = ToolIdentity("first@example.com", "first", "child.example")
 	second = ToolIdentity("second@example.com", "second", "child.example")
 
@@ -588,8 +774,9 @@ def test_dynamic_turn_does_not_put_token_in_model_input(tmp_path) -> None:
 			self.identity = None
 			self.turn_input = ""
 
-		def bind_tool_identity(self, thread_id, identity):
+		def bind_tool_identity(self, thread_id, identity, *, workspace=None):
 			assert thread_id == "thread-1"
+			assert workspace == str(tmp_path)
 			self.identity = identity
 
 		def clear_tool_identity(self, thread_id, identity):
@@ -948,7 +1135,7 @@ def test_stream_exposes_safe_dynamic_process_and_summary() -> None:
 
 def test_dynamic_tool_request_publishes_safe_lifecycle_events() -> None:
 	class FakeProxy:
-		async def call(self, tool, arguments, *, identity):
+		async def call(self, tool, arguments, *, identity, workspace=None):
 			assert tool == "frappe_get_document"
 			assert arguments == {"name": "secret-record"}
 			assert identity == ToolIdentity("owner@example.com", "Administrator", "child.example")
