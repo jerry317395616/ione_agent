@@ -9,9 +9,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from app.app_server import CodexAppServer
 from app.bridge import ChatCompletionRequest, CodexBridge, ProcessDisplay, latest_user_text, stream_chunk
-from app.dynamic_tools import DynamicToolProxy
+from app.dynamic_tools import DynamicToolProxy, tool_risk_level
 from app.identity import ToolIdentity, issue_actor_token, tool_identity, with_trusted_identity_context
 from app.oracle_browser import OracleBrowserResult, parse_oracle_action
 from app.public_output import sanitize_public_text
@@ -272,13 +273,16 @@ def test_model_catalog_has_selected_model(monkeypatch, tmp_path) -> None:
 	catalog = settings.model_catalog()
 	models = {model["slug"]: model for model in catalog["models"]}
 	assert settings.model in models
-	assert models[settings.model]["context_window"] == 1000000
+	assert models[settings.model]["context_window"] == 262144
 	assert models[settings.model]["include_apps_usage_instructions"] is False
 	assert models[settings.model]["include_skills_usage_instructions"] is True
 	assert all("DeepSeek" not in model["display_name"] for model in models.values())
 	assert all("DeepSeek" not in model["description"] for model in models.values())
 	assert models[settings.model]["base_instructions"] == settings.developer_instructions
 	assert settings.app_server_message_limit_bytes > 64 * 1024
+	assert settings.runtime_mode == "codex"
+	assert settings.model_api_base == "http://10.144.133.1:1234/v1"
+	assert settings.network_access is False
 
 
 def test_site_workspace_scope_shares_one_directory(monkeypatch, tmp_path) -> None:
@@ -340,6 +344,55 @@ def test_model_catalog_supports_configured_local_model(monkeypatch, tmp_path) ->
 	assert models[settings.model]["display_name"] == "I-ONE AI Local"
 	assert models[settings.model]["context_window"] == 262144
 	assert models[settings.model]["auto_compact_token_limit"] == 235929
+
+
+def test_model_endpoint_rejects_public_provider_by_default(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("IONE_MODEL_API_KEY", "private-gateway-key")
+	monkeypatch.setenv("IONE_MODEL_API_BASE", "https://api.deepseek.com/v1")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+
+	with pytest.raises(RuntimeError, match="private network"):
+		Settings.from_environment()
+
+
+def test_model_endpoint_accepts_and_normalizes_internal_gateway(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("IONE_MODEL_API_KEY", "private-gateway-key")
+	monkeypatch.setenv("IONE_MODEL_API_BASE", "http://10.144.133.1:1234")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_CODEX_HOME", str(tmp_path / "codex-home"))
+	monkeypatch.setenv("IONE_CODEX_DATA_DIR", str(tmp_path / "data"))
+	monkeypatch.setenv("IONE_CODEX_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+
+	settings = Settings.from_environment()
+	settings.prepare()
+	config = (settings.codex_home / "config.toml").read_text(encoding="utf-8")
+
+	assert settings.model_api_base == "http://10.144.133.1:1234/v1"
+	assert 'base_url = "http://10.144.133.1:1234/v1"' in config
+	assert 'env_key = "IONE_MODEL_API_KEY"' in config
+	assert "DEEPSEEK_API_KEY" not in config
+	assert settings.process_environment()["IONE_MODEL_API_KEY"] == "private-gateway-key"
+
+
+def test_codex_runtime_ignores_legacy_browser_flag(monkeypatch, tmp_path) -> None:
+	bin_path = tmp_path / "codex"
+	bin_path.write_text("", encoding="utf-8")
+	monkeypatch.setenv("IONE_CODEX_BRIDGE_TOKEN", "bridge")
+	monkeypatch.setenv("IONE_MODEL_API_KEY", "private-gateway-key")
+	monkeypatch.setenv("IONE_CODEX_BIN", str(bin_path))
+	monkeypatch.setenv("IONE_AGENT_RUNTIME", "codex")
+	monkeypatch.setenv("IONE_ORACLE_BROWSER_ENABLED", "1")
+
+	settings = Settings.from_environment()
+
+	assert settings.runtime_mode == "codex"
+	assert settings.oracle_browser_enabled is False
 
 
 def test_prepare_writes_mcp_config_without_secret(monkeypatch, tmp_path) -> None:
@@ -427,6 +480,15 @@ def test_prepare_can_use_app_server_dynamic_tools(monkeypatch, tmp_path) -> None
 	assert "[mcp_servers.manager]" not in config
 
 
+def test_tool_risk_policy_blocks_irreversible_operations() -> None:
+	assert tool_risk_level("frappe_list_documents") == "read_or_analyze"
+	assert tool_risk_level("frappe_create_document") == "draft_write"
+	assert tool_risk_level("frappe_publish_spreadsheet_attachment") == "draft_write"
+	assert tool_risk_level("frappe_delete_document") == "restricted"
+	assert tool_risk_level("frappe_submit_document") == "restricted"
+	assert tool_risk_level("frappe_update_permission") == "restricted"
+
+
 def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None:
 	settings = SimpleNamespace(
 		frappe_mcp_enabled_tools=("frappe_get_context",),
@@ -465,7 +527,11 @@ def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None
 
 	async def probe():
 		specs = await proxy.specs()
-		assert [spec["name"] for spec in specs] == ["frappe_get_context"]
+		assert [spec["name"] for spec in specs] == [
+			"frappe_get_context",
+			"ione_propose_learning",
+			"ione_list_learning_proposals",
+		]
 		assert "actor_token" not in specs[0]["inputSchema"]["properties"]
 		identity = ToolIdentity("owner@example.com", "Administrator", "child.example")
 		result = await proxy.call(

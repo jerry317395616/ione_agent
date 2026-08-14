@@ -44,16 +44,40 @@ def test_env_round_trip(tmp_path: Path) -> None:
 def test_existing_site_model_settings_override_host_defaults() -> None:
 	base = {
 		"DEEPSEEK_API_BASE": "https://api.example.com",
+		"DEEPSEEK_API_KEY": "host-key",
 		"IONE_CODEX_MODEL": "remote-model",
 		"IONE_CODEX_MODEL_PROVIDER": "remote",
 	}
 	existing = {
 		"DEEPSEEK_API_BASE": "http://10.144.133.1:1234",
+		"DEEPSEEK_API_KEY": "site-key",
 		"IONE_CODEX_MODEL": "qwen3.6-35b-a3b-fp8",
 		"IONE_CODEX_MODEL_PROVIDER": "qwen-local",
 	}
 
-	assert installer.common_bridge_env(base, existing) == existing
+	assert installer.common_bridge_env(base, existing) == {
+		"IONE_AGENT_RUNTIME": "codex",
+		"IONE_CODEX_MODEL": "qwen3.6-35b-a3b-fp8",
+		"IONE_CODEX_MODEL_CONTEXT_WINDOW": "262144",
+		"IONE_CODEX_MODEL_PROVIDER": "qwen-local",
+		"IONE_CODEX_NETWORK_ACCESS": "false",
+		"IONE_CODEX_SKILLS": (
+			"child-site-brain,child-site,education,tongjianyun,"
+			"analyze-tongjianyun-recipe,frappe-spreadsheets,erpnext-operations,"
+			"erpnext-procurement,frappe-business,ione-business"
+		),
+		"IONE_MODEL_API_BASE": "http://10.144.133.1:1234",
+		"IONE_MODEL_API_KEY": "site-key",
+		"IONE_MODEL_REQUIRE_PRIVATE_NETWORK": "1",
+	}
+
+
+def test_common_bridge_env_rejects_public_model_endpoint() -> None:
+	with pytest.raises(ValueError, match="private network"):
+		installer.common_bridge_env(
+			{"IONE_MODEL_API_BASE": "https://api.deepseek.com", "IONE_MODEL_API_KEY": "key"},
+			{},
+		)
 
 
 def test_ensure_officecli_verifies_and_installs_pinned_binary(tmp_path: Path) -> None:

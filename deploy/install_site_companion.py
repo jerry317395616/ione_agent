@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import platform
@@ -20,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 SITE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -39,13 +41,20 @@ OFFICECLI_LINUX_ASSETS = {
 COMMON_BRIDGE_ENV = {
 	"DEEPSEEK_API_BASE",
 	"DEEPSEEK_API_KEY",
+	"QWEN_API_BASE",
+	"QWEN_API_KEY",
+	"IONE_AGENT_RUNTIME",
 	"IONE_CODEX_BIN",
 	"IONE_CODEX_MODEL",
 	"IONE_CODEX_MODEL_CONTEXT_WINDOW",
 	"IONE_CODEX_MODEL_PROVIDER",
 	"IONE_CODEX_NETWORK_ACCESS",
 	"IONE_CODEX_SANDBOX",
+	"IONE_CODEX_SKILLS",
 	"IONE_CODEX_WORKSPACE_SCOPE",
+	"IONE_MODEL_API_BASE",
+	"IONE_MODEL_API_KEY",
+	"IONE_MODEL_REQUIRE_PRIVATE_NETWORK",
 	"IONE_CODEX_RPC_TIMEOUT_SECONDS",
 	"IONE_CODEX_MESSAGE_LIMIT_BYTES",
 	"IONE_CODEX_KEEPALIVE_SECONDS",
@@ -113,14 +122,79 @@ def env_text(values: dict[str, str]) -> str:
 
 
 def common_bridge_env(base: dict[str, str], existing: dict[str, str]) -> dict[str, str]:
-	"""Keep a site's explicit model settings when an installation is repeated."""
+	"""Keep site settings and migrate model credentials to private I-ONE names."""
 
 	values: dict[str, str] = {}
 	for name in COMMON_BRIDGE_ENV:
 		value = existing.get(name) or base.get(name)
 		if value:
 			values[name] = value
+	model_base = next(
+		(
+			value
+			for name in ("IONE_MODEL_API_BASE", "QWEN_API_BASE", "DEEPSEEK_API_BASE")
+			if (value := existing.get(name) or base.get(name))
+		),
+		"http://10.144.133.1:1234",
+	)
+	model_key = next(
+		(
+			value
+			for name in ("IONE_MODEL_API_KEY", "QWEN_API_KEY", "DEEPSEEK_API_KEY")
+			if (value := existing.get(name) or base.get(name))
+		),
+		"",
+	)
+	validate_private_model_base(model_base)
+	if not model_key:
+		raise ValueError("The internal Qwen model API key is missing")
+	for legacy_name in ("DEEPSEEK_API_BASE", "DEEPSEEK_API_KEY", "QWEN_API_BASE", "QWEN_API_KEY"):
+		values.pop(legacy_name, None)
+	values.update(
+		{
+			"IONE_AGENT_RUNTIME": "codex",
+			"IONE_MODEL_API_BASE": model_base.rstrip("/"),
+			"IONE_MODEL_API_KEY": model_key,
+			"IONE_MODEL_REQUIRE_PRIVATE_NETWORK": "1",
+			"IONE_CODEX_NETWORK_ACCESS": "false",
+			"IONE_CODEX_MODEL": existing.get("IONE_CODEX_MODEL")
+			or base.get("IONE_CODEX_MODEL")
+			or "qwen3.6-35b-a3b-fp8",
+			"IONE_CODEX_MODEL_PROVIDER": existing.get("IONE_CODEX_MODEL_PROVIDER")
+			or base.get("IONE_CODEX_MODEL_PROVIDER")
+			or "qwen-local",
+			"IONE_CODEX_MODEL_CONTEXT_WINDOW": existing.get("IONE_CODEX_MODEL_CONTEXT_WINDOW")
+			or base.get("IONE_CODEX_MODEL_CONTEXT_WINDOW")
+			or "262144",
+			"IONE_CODEX_SKILLS": existing.get("IONE_CODEX_SKILLS")
+			or base.get("IONE_CODEX_SKILLS")
+			or (
+				"child-site-brain,child-site,education,tongjianyun,"
+				"analyze-tongjianyun-recipe,frappe-spreadsheets,erpnext-operations,"
+				"erpnext-procurement,frappe-business,ione-business"
+			),
+		}
+	)
 	return values
+
+
+def validate_private_model_base(value: str) -> str:
+	"""Reject a public model endpoint before writing a production service file."""
+
+	parsed = urlparse(str(value or "").strip())
+	if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+		raise ValueError("The model API base must be an http(s) endpoint")
+	host = parsed.hostname.strip().lower().rstrip(".")
+	is_private = host in {"localhost", "host.docker.internal"}
+	try:
+		address = ipaddress.ip_address(host)
+	except ValueError:
+		is_private = is_private or "." not in host or host.endswith((".internal", ".local"))
+	else:
+		is_private = bool(address.is_private or address.is_loopback or address.is_link_local)
+	if not is_private:
+		raise ValueError("The model API base must use the server/private network")
+	return str(value).strip().rstrip("/")
 
 
 def atomic_write(path: Path, content: str, mode: int) -> None:

@@ -14,6 +14,7 @@ from pathlib import Path, PurePath
 from typing import Any
 
 from app.identity import ToolIdentity, issue_actor_token
+from app.learning import LearningStore
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,8 @@ RAW_SPREADSHEET_WRITE_TOOL = "frappe_attach_spreadsheet_file"
 STAGE_SPREADSHEET_TOOL = "frappe_stage_spreadsheet_attachment"
 PUBLISH_SPREADSHEET_TOOL = "frappe_publish_spreadsheet_attachment"
 OFFICECLI_XLSX_TOOL = "officecli_xlsx"
+PROPOSE_LEARNING_TOOL = "ione_propose_learning"
+LIST_LEARNING_TOOL = "ione_list_learning_proposals"
 OFFICECLI_ALLOWED_VERBS = {
 	"add",
 	"batch",
@@ -44,6 +47,36 @@ OFFICECLI_ALLOWED_VERBS = {
 	"view",
 }
 OFFICECLI_FILE_SUFFIXES = {".csv", ".json", ".tsv", ".xlsx"}
+RESTRICTED_TOOL_MARKERS = (
+	"approve",
+	"cancel",
+	"delete",
+	"permission",
+	"reject",
+	"set_password",
+	"submit",
+	"system_config",
+	"unsafe",
+)
+
+
+def tool_risk_level(name: str) -> str:
+	"""Return the product risk level used before a tool reaches the model."""
+
+	normalized = str(name or "").strip().lower()
+	if any(marker in normalized for marker in RESTRICTED_TOOL_MARKERS):
+		return "restricted"
+	if normalized.startswith(
+		(
+			"frappe_create_",
+			"frappe_update_",
+			"frappe_upsert_",
+			"frappe_attach_",
+			"frappe_publish_",
+		)
+	):
+		return "draft_write"
+	return "read_or_analyze"
 
 
 class DynamicToolProxy:
@@ -55,6 +88,8 @@ class DynamicToolProxy:
 
 	def __init__(self, settings: Settings) -> None:
 		self.settings = settings
+		data_dir = getattr(settings, "data_dir", None)
+		self.learning_store = LearningStore(Path(data_dir) / "learning.sqlite3" if data_dir else ":memory:")
 		self._specs: list[dict[str, Any]] | None = None
 		self._tool_names: set[str] = set()
 		self._lock = asyncio.Lock()
@@ -76,10 +111,25 @@ class DynamicToolProxy:
 		workspace: str | Path | None = None,
 	) -> dict[str, Any]:
 		await self.specs()
+		if tool_risk_level(tool) == "restricted":
+			return self._failure("该操作需要人工在业务系统中完成，I-ONE Agent 不会代为执行。")
 		if tool not in self._tool_names:
 			return self._failure("该业务工具未启用。")
 		if identity is None or len(self.settings.identity_shared_secret) < 32:
 			return self._failure("当前登录身份不完整，请重新进入 I-ONE Agent 后重试。")
+		try:
+			if tool == PROPOSE_LEARNING_TOOL:
+				return self._success(self.learning_store.propose(identity, arguments))
+			if tool == LIST_LEARNING_TOOL:
+				return self._success(
+					{
+						"proposals": self.learning_store.list_proposals(
+							status="pending", proposer_email=identity.email, limit=50
+						)
+					}
+				)
+		except ValueError as exc:
+			return self._failure(str(exc))
 		actor_token = issue_actor_token(
 			email=identity.email,
 			user_hint=identity.user_hint,
@@ -143,6 +193,9 @@ class DynamicToolProxy:
 			name = str(definition.get("name") or "")
 			if not name or (allowed and name not in allowed):
 				continue
+			if tool_risk_level(name) == "restricted":
+				logger.warning("Suppressing restricted dynamic tool name=%s", name)
+				continue
 			if name in {RAW_SPREADSHEET_READ_TOOL, RAW_SPREADSHEET_WRITE_TOOL}:
 				continue
 			input_schema = definition.get("inputSchema") or {
@@ -178,6 +231,7 @@ class DynamicToolProxy:
 		officecli_bin = getattr(self.settings, "officecli_bin", None)
 		if officecli_bin and Path(officecli_bin).is_file():
 			specs.append(self._officecli_spec())
+		specs.extend((self._propose_learning_spec(), self._list_learning_spec()))
 		self._tool_names = {spec["name"] for spec in specs}
 		if not specs:
 			raise RuntimeError("Frappe MCP returned no enabled tools")
@@ -256,6 +310,68 @@ class DynamicToolProxy:
 				"additionalProperties": False,
 			},
 		}
+
+	@staticmethod
+	def _propose_learning_spec() -> dict[str, Any]:
+		return {
+			"type": "function",
+			"name": PROPOSE_LEARNING_TOOL,
+			"description": (
+				"把用户明确纠正、稳定偏好或重复成功流程提交为待审核的站点学习候选。"
+				"只创建候选，不会修改 Skill、共享记忆、权限或生产行为。不得包含儿童、健康、"
+				"家庭、账号、凭证等个人或敏感信息。"
+			),
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"category": {
+						"type": "string",
+						"enum": [
+							"business_rule",
+							"user_preference",
+							"workflow",
+							"validation",
+							"reporting",
+						],
+					},
+					"trigger": {"type": "string"},
+					"proposed_rule": {"type": "string"},
+					"evidence": {"type": "string"},
+					"risk": {"type": "string"},
+					"eval_prompt": {"type": "string"},
+					"expected_behavior": {"type": "string"},
+				},
+				"required": [
+					"category",
+					"trigger",
+					"proposed_rule",
+					"evidence",
+					"risk",
+					"eval_prompt",
+					"expected_behavior",
+				],
+				"additionalProperties": False,
+			},
+		}
+
+	@staticmethod
+	def _list_learning_spec() -> dict[str, Any]:
+		return {
+			"type": "function",
+			"name": LIST_LEARNING_TOOL,
+			"description": "列出当前登录用户提交且仍待管理员审核的学习候选。",
+			"inputSchema": {
+				"type": "object",
+				"properties": {},
+				"additionalProperties": False,
+			},
+		}
+
+	def approved_learning_context(self) -> str:
+		return self.learning_store.approved_context()
+
+	def close(self) -> None:
+		self.learning_store.close()
 
 	def _stage_spreadsheet(
 		self,

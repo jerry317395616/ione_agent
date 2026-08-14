@@ -1,0 +1,4 @@
+interface:
+  display_name: "child 站点主脑"
+  short_description: "统一幼儿园跨应用业务推理、受控执行、数值验证与学习提案流程"
+  default_prompt: "Use $child-site-brain to complete this child-site business request safely and verify the result."

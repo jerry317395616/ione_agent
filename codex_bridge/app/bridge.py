@@ -382,6 +382,10 @@ class CodexBridge:
 
 	def close(self) -> None:
 		self.store.close()
+		proxy = getattr(self.app_server, "dynamic_tool_proxy", None)
+		close_proxy = getattr(proxy, "close", None)
+		if callable(close_proxy):
+			close_proxy()
 
 	def workspace_for(self, user_id: str) -> Path:
 		if self.settings.workspace_scope == "site":

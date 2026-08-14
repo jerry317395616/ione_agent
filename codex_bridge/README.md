@@ -4,14 +4,17 @@ This service exposes the small OpenAI-compatible surface that LibreChat needs
 and delegates every conversation turn to the open-source Codex App Server.
 
 It deliberately contains no intent router, LangGraph graph, UFO, Hermes,
-OpenClaw, or fallback agent. Codex App Server is the only agent runtime and
-DeepSeek is its model provider through the Responses API. Business operations
-are exposed by the official Frappe MCP package in `ione_core`; this bridge only
-configures that authenticated endpoint and installs versioned business Skills.
+OpenClaw, or fallback agent. Codex App Server is the only agent runtime. The
+production child-site profile connects it directly to the Qwen Responses API
+gateway on the server's private network. Business operations are exposed by
+the official Frappe MCP package in `ione_core`; this bridge only configures that
+authenticated endpoint and installs versioned business Skills.
 
-The production default is `deepseek-v4-flash`. The model remains configurable
-through `IONE_CODEX_MODEL`, so `deepseek-v4-pro` can be enabled after DeepSeek
-opens Codex integration for that model.
+The production default is `qwen3.6-35b-a3b-fp8`. `IONE_MODEL_API_BASE` is
+validated at startup and public model hosts are rejected unless the explicit
+private-network guard is disabled for an isolated development profile. Legacy
+`QWEN_*` and `DEEPSEEK_*` variables are read only as migration fallbacks; new
+deployments write the neutral `IONE_MODEL_*` variables.
 
 ## Runtime contract
 
@@ -19,6 +22,9 @@ opens Codex integration for that model.
 - `GET /v1/models` and `POST /v1/chat/completions` use a bearer token.
 - LibreChat conversation IDs are mapped to persisted Codex thread IDs in
   SQLite. Codex itself persists thread history under `CODEX_HOME`.
+- All users on one Frappe site share the same controlled site workspace while
+  conversation and login identity remain isolated. Business reads and writes
+  are always authorized again by Frappe MCP for the current login.
 - Streaming requests emit OpenAI-compatible SSE chunks and periodic comments,
   so long-running tool work does not depend on a short proxy timeout.
 - Client cancellation interrupts the active Codex turn.
@@ -27,11 +33,21 @@ opens Codex integration for that model.
 - The initial MCP surface supports permission-aware reads, draft writes and
   private text attachments. Submit, cancel, delete, SQL and arbitrary RPC are
   intentionally absent.
+- Nutrition and workbook analysis are model-designed but must be executed with
+  Python or Excel formulas, checked, validated and returned as a real workbook.
+  The Agent never treats mental arithmetic as a verified business result.
 
 ## Required environment
 
 See `ione-codex-agent.env.example`. Secrets must be supplied by the service
 manager and must not be committed.
+
+For production, keep `IONE_AGENT_RUNTIME=codex`,
+`IONE_MODEL_REQUIRE_PRIVATE_NETWORK=1`, and point `IONE_MODEL_API_BASE` at the
+server-internal Qwen gateway (for example `http://10.144.133.1:1234`). Do not
+use a public domain for the model endpoint. `IONE_CODEX_NETWORK_ACCESS=false`
+also prevents shell tasks from using the network; it does not block the model
+provider connection managed by Codex App Server.
 
 Use a dedicated Frappe integration user rather than `Administrator`. Set
 `IONE_FRAPPE_AUTH_HEADER` to `token api_key:api_secret` and grant that user only

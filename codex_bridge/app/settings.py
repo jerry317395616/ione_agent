@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 DEFAULT_MCP_TOOLS = (
 	"frappe_get_context",
@@ -45,8 +47,12 @@ If asked about implementation details, identify yourself only as I-ONE Agent pow
 explain that protected internal architecture is not exposed through the product interface.
 When the manager Frappe MCP server is available, use its permission-aware tools for business data.
 When the user asks for a Tongjianyun recipe nutrition or weighted-food analysis, call
-frappe_generate_tongjianyun_recipe_analysis with the exact recipe name and return its download_url.
-Nutrition calculations must come from that deterministic report tool; never invent nutrient values.
+frappe_generate_tongjianyun_recipe_analysis with the exact recipe name when the existing standard
+report is sufficient. When the user asks for a new analysis, a changed workbook or additional sheets,
+use the spreadsheet Skill and executable Python or Excel formulas in the assigned workspace. The model
+owns the analysis design, but every numeric result must be reproducible: keep units explicit, document
+data sources and formulas, run consistency checks, validate the final workbook and clearly identify
+missing source data. Never invent nutrient values or present unexecuted mental arithmetic as verified.
 When the user asks to inspect, extend or redesign an existing Excel workbook, use the
 frappe-spreadsheets Skill and its stage, OfficeCLI and publish tools. Return a real .xlsx attachment;
 never replace a requested workbook with text, CSV, JSON or a description of multiple sheets.
@@ -54,9 +60,70 @@ Load the matching business Skill before a multi-step CRM, ERPNext, Wiki or medic
 Inspect DocType metadata before writing unfamiliar records. Create or update drafts only, then read back
 the saved document and report its exact DocType and name. Never imply that a document was submitted,
 deleted or approved because those operations are intentionally unavailable.
+Treat corrections, preferences and repeated successful workflows as learning candidates, not as
+permission to silently change production behavior. Describe the proposed reusable rule and wait for an
+administrator to approve it before changing a foundational Skill, shared memory or site configuration.
 """
 
 HTTP_HOST_PATTERN = re.compile(r"^[A-Za-z0-9.-]+(?::[0-9]{1,5})?$")
+PRIVATE_MODEL_HOST_SUFFIXES = (".internal", ".local")
+
+
+def _first_environment(*names: str, default: str = "") -> str:
+	for name in names:
+		value = os.getenv(name, "").strip()
+		if value:
+			return value
+	return default
+
+
+def normalize_model_api_base(value: str, *, require_private: bool = True) -> str:
+	"""Validate an OpenAI-compatible model endpoint and normalize its /v1 base path.
+
+	The child-site Agent is intentionally allowed to reach only a loopback, RFC1918,
+	link-local or explicitly internal DNS endpoint. This validation happens before the
+	Codex app-server process starts, so a stale public-provider environment cannot leak
+	child-site prompts or business data.
+	"""
+
+	raw = str(value or "").strip().rstrip("/")
+	parsed = urlparse(raw)
+	if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+		raise RuntimeError("IONE_MODEL_API_BASE must be an http(s) OpenAI-compatible endpoint")
+	if parsed.username or parsed.password or parsed.query or parsed.fragment:
+		raise RuntimeError("IONE_MODEL_API_BASE must not contain credentials, query or fragment")
+	try:
+		port = parsed.port
+	except ValueError as exc:
+		raise RuntimeError("IONE_MODEL_API_BASE contains an invalid port") from exc
+	if port is not None and not 1 <= port <= 65535:
+		raise RuntimeError("IONE_MODEL_API_BASE contains an invalid port")
+
+	host = parsed.hostname.strip().lower().rstrip(".")
+	if require_private:
+		is_private = host in {"localhost", "host.docker.internal"}
+		try:
+			address = ipaddress.ip_address(host)
+		except ValueError:
+			# A single-label name is a container/service DNS name. Dotted names must
+			# explicitly declare that they belong to an internal DNS namespace.
+			is_private = is_private or "." not in host or host.endswith(PRIVATE_MODEL_HOST_SUFFIXES)
+		else:
+			is_private = bool(address.is_private or address.is_loopback or address.is_link_local)
+		if not is_private:
+			raise RuntimeError(
+				"IONE_MODEL_API_BASE must resolve inside the server/private network; public model endpoints are disabled"
+			)
+
+	path = parsed.path.rstrip("/")
+	if not path.endswith("/v1"):
+		path = f"{path}/v1" if path else "/v1"
+	netloc = host
+	if ":" in host and not host.startswith("["):
+		netloc = f"[{host}]"
+	if port is not None:
+		netloc = f"{netloc}:{port}"
+	return urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
 
 def required(*names: str) -> str:
@@ -81,8 +148,10 @@ def csv_values(name: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
 	bridge_token: str
-	deepseek_api_key: str
-	deepseek_api_base: str
+	model_api_key: str
+	model_api_base: str
+	require_private_model: bool
+	runtime_mode: str
 	model: str
 	model_provider: str
 	model_context_window: int
@@ -114,9 +183,22 @@ class Settings:
 
 	@classmethod
 	def from_environment(cls) -> Settings:
-		base = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip().rstrip("/")
-		if not base.endswith("/v1"):
-			base += "/v1"
+		require_private_model = as_bool("IONE_MODEL_REQUIRE_PRIVATE_NETWORK", True)
+		base = normalize_model_api_base(
+			_first_environment(
+				"IONE_MODEL_API_BASE",
+				"QWEN_API_BASE",
+				"DEEPSEEK_API_BASE",
+				default="http://10.144.133.1:1234",
+			),
+			require_private=require_private_model,
+		)
+		model_api_key = _first_environment("IONE_MODEL_API_KEY", "QWEN_API_KEY", "DEEPSEEK_API_KEY")
+		if not model_api_key:
+			raise RuntimeError("Required environment variable is missing: IONE_MODEL_API_KEY or QWEN_API_KEY")
+		runtime_mode = os.getenv("IONE_AGENT_RUNTIME", "codex").strip().lower()
+		if runtime_mode not in {"codex", "oracle-browser"}:
+			raise RuntimeError("IONE_AGENT_RUNTIME must be codex or oracle-browser")
 		sandbox = os.getenv("IONE_CODEX_SANDBOX", "workspace-write").strip()
 		if sandbox not in {"read-only", "workspace-write"}:
 			raise RuntimeError("IONE_CODEX_SANDBOX must be read-only or workspace-write")
@@ -131,13 +213,15 @@ class Settings:
 			raise RuntimeError("IONE_MANAGER_IDENTITY_AUDIENCE is invalid")
 		return cls(
 			bridge_token=required("IONE_CODEX_BRIDGE_TOKEN", "IONE_LIBRECHAT_API_TOKEN"),
-			deepseek_api_key=required("DEEPSEEK_API_KEY"),
-			deepseek_api_base=base,
-			model=os.getenv("IONE_CODEX_MODEL", "deepseek-v4-flash").strip(),
-			model_provider=os.getenv("IONE_CODEX_MODEL_PROVIDER", "deepseek").strip(),
+			model_api_key=model_api_key,
+			model_api_base=base,
+			require_private_model=require_private_model,
+			runtime_mode=runtime_mode,
+			model=os.getenv("IONE_CODEX_MODEL", "qwen3.6-35b-a3b-fp8").strip(),
+			model_provider=os.getenv("IONE_CODEX_MODEL_PROVIDER", "qwen-local").strip(),
 			model_context_window=max(
 				32768,
-				min(4_000_000, int(os.getenv("IONE_CODEX_MODEL_CONTEXT_WINDOW", "1000000"))),
+				min(4_000_000, int(os.getenv("IONE_CODEX_MODEL_CONTEXT_WINDOW", "262144"))),
 			),
 			codex_bin=Path(required("IONE_CODEX_BIN")).expanduser().resolve(),
 			officecli_bin=Path(os.getenv("IONE_OFFICECLI_BIN", "/opt/ione-codex-agent/bin/officecli"))
@@ -156,7 +240,7 @@ class Settings:
 			.resolve(),
 			workspace_scope=workspace_scope,
 			sandbox=sandbox,
-			network_access=as_bool("IONE_CODEX_NETWORK_ACCESS", True),
+			network_access=as_bool("IONE_CODEX_NETWORK_ACCESS", False),
 			developer_instructions=os.getenv(
 				"IONE_CODEX_DEVELOPER_INSTRUCTIONS", DEFAULT_INSTRUCTIONS
 			).strip(),
@@ -177,7 +261,9 @@ class Settings:
 			enabled_skills=csv_values("IONE_CODEX_SKILLS"),
 			identity_shared_secret=os.getenv("IONE_MANAGER_IDENTITY_SECRET", "").strip(),
 			identity_audience=identity_audience,
-			oracle_browser_enabled=as_bool("IONE_ORACLE_BROWSER_ENABLED", False),
+			oracle_browser_enabled=(
+				runtime_mode == "oracle-browser" and as_bool("IONE_ORACLE_BROWSER_ENABLED", False)
+			),
 			oracle_browser_url=os.getenv("IONE_ORACLE_BROWSER_URL", "http://127.0.0.1:9474")
 			.strip()
 			.rstrip("/"),
@@ -262,8 +348,8 @@ enabled = false
 
 [model_providers.{json.dumps(self.model_provider)}]
 name = "I-ONE AI"
-base_url = {json.dumps(self.deepseek_api_base)}
-env_key = "DEEPSEEK_API_KEY"
+base_url = {json.dumps(self.model_api_base)}
+env_key = "IONE_MODEL_API_KEY"
 wire_api = "responses"
 request_max_retries = 3
 stream_max_retries = 3
@@ -298,20 +384,13 @@ enabled_tools = [
 
 	def model_catalog(self) -> dict:
 		models = []
-		slugs = tuple(dict.fromkeys((self.model, "deepseek-v4-flash", "deepseek-v4-pro")))
+		slugs = (self.model,)
 		for priority, slug in enumerate(slugs, start=1):
-			selected = slug == self.model
-			context_window = self.model_context_window if selected else 1_000_000
+			context_window = self.model_context_window
 			models.append(
 				{
 					"slug": slug,
-					"display_name": (
-						"I-ONE AI Local"
-						if selected and self.model_provider != "deepseek"
-						else "I-ONE AI Advanced"
-						if slug.endswith("pro")
-						else "I-ONE AI Standard"
-					),
+					"display_name": "I-ONE AI Local",
 					"description": "I-ONE managed enterprise intelligence model",
 					"default_reasoning_level": "high",
 					"supported_reasoning_levels": [
@@ -353,7 +432,7 @@ enabled_tools = [
 		environment.update(
 			{
 				"CODEX_HOME": str(self.codex_home),
-				"DEEPSEEK_API_KEY": self.deepseek_api_key,
+				"IONE_MODEL_API_KEY": self.model_api_key,
 				"HOME": str(self.codex_home.parent),
 				"IONE_OFFICECLI_BIN": str(self.officecli_bin),
 			}

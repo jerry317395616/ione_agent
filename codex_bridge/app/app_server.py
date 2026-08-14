@@ -324,6 +324,9 @@ class CodexAppServer:
 
 	async def start_thread(self, workspace: str) -> str:
 		dynamic_tools = await self.dynamic_tool_proxy.specs() if self.dynamic_tool_proxy else None
+		learning_context = (
+			self.dynamic_tool_proxy.approved_learning_context() if self.dynamic_tool_proxy else ""
+		)
 		result = await self.request(
 			"thread/start",
 			{
@@ -332,7 +335,7 @@ class CodexAppServer:
 				"cwd": workspace,
 				"approvalPolicy": "never",
 				"sandbox": self.settings.sandbox,
-				"developerInstructions": self.settings.developer_instructions,
+				"developerInstructions": self.settings.developer_instructions + learning_context,
 				"ephemeral": False,
 				"dynamicTools": dynamic_tools,
 			},

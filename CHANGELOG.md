@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+- Make Codex App Server the production child-site runtime and connect it directly to the server-internal Qwen gateway.
+- Reject public model endpoints by default and migrate deployment environments to neutral `IONE_MODEL_*` settings.
+- Add the `child-site-brain` Skill for cross-application kindergarten workflows, reproducible analysis and privacy boundaries.
+- Suppress irreversible business tools before they reach the model.
+- Add staged site-learning proposals that require evaluation and administrator approval before they affect new conversations.
+
 ## 0.7.0
 
 - Add an opt-in Oracle DeepSeek browser primary inference loop for site-scoped bridges.
