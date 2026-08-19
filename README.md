@@ -5,6 +5,7 @@ I-ONE Agent is a Frappe application for enterprise conversations, verifiable lea
 ## Architecture
 
 - Frappe: authentication, permissions, session/message persistence and the `/agent` user interface.
+- Dify: published chat application, workflow/agent orchestration and its own administrator console.
 - Lead Intelligence Orchestrator: governed LangGraph model/tool loop with persistent checkpoints, typed tools, policy enforcement and idempotent result synchronization.
 - Hermes Agent: internet research against configured official tender and procurement sources.
 - DeepSeek: first-stage planning model and final specialist reviewer for qualified leads.
@@ -31,12 +32,22 @@ The computer makes an outbound-only TLS WebSocket connection. It does not expose
 
 ```json
 {
+  "ione_agent_dify_base_url": "https://dify.example.com/v1",
+  "ione_agent_dify_api_key": "app-secret-from-a-published-dify-chat-app",
+  "ione_agent_dify_user_secret": "replace-with-a-long-random-secret",
+  "ione_agent_dify_model_label": "Qwen3-35B-A3B-FP8",
   "ione_agent_gateway_url": "http://10.144.133.1:8098",
   "ione_agent_gateway_token": "replace-with-a-long-random-token",
   "ione_agent_orchestrator_url": "http://10.144.133.1:8100",
   "ione_agent_orchestrator_token": "replace-with-a-different-long-random-token"
 }
 ```
+
+Normal chat is sent from the Frappe backend to the published Dify app. The Dify API key never reaches
+the browser, and Frappe users are represented in Dify by stable HMAC identifiers instead of email
+addresses. Dify task, message, workflow and conversation identifiers are stored with the Frappe run
+for permission checks and auditing. Lead discovery and controlled desktop execution retain their
+specialized runtimes.
 
 ## Gateway configuration
 

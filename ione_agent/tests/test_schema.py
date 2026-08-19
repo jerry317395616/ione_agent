@@ -10,6 +10,7 @@ WINDOWS_LAUNCHER = APP_ROOT / "device" / "windows" / "launch.ps1"
 AGENT_TEMPLATE = APP_ROOT / "www" / "agent.html"
 AGENT_SCRIPT = APP_ROOT / "public" / "js" / "agent.js"
 AGENT_API = APP_ROOT / "api.py"
+DIFY_CLIENT = APP_ROOT / "dify.py"
 LEAD_SERVICE = APP_ROOT / "lead_service.py"
 
 
@@ -87,6 +88,31 @@ def test_completed_lead_runs_can_resume_an_incomplete_frappe_sync():
 	assert "def _run_needs_poll(doc)" in api
 	assert "task_status not in TERMINAL_DISCOVERY_STATUSES" in api
 	assert "if _run_needs_poll(doc) and doc.gateway_run_id:" in api
+
+
+def test_dify_conversations_and_runs_are_auditable():
+	session_path = DOCTYPE_ROOT / "i_one_agent_session" / "i_one_agent_session.json"
+	run_path = DOCTYPE_ROOT / "i_one_agent_run" / "i_one_agent_run.json"
+	session = json.loads(session_path.read_text(encoding="utf-8"))
+	run = json.loads(run_path.read_text(encoding="utf-8"))
+	session_fields = {field["fieldname"]: field for field in session["fields"]}
+	run_fields = {field["fieldname"]: field for field in run["fields"]}
+	assert session_fields["dify_conversation_id"]["read_only"] == 1
+	assert session_fields["dify_conversation_id"]["unique"] == 1
+	assert "dify" in run_fields["run_type"]["options"].splitlines()
+	for fieldname in ("dify_task_id", "dify_message_id", "dify_workflow_run_id"):
+		assert run_fields[fieldname]["read_only"] == 1
+
+
+def test_dify_api_key_stays_in_the_frappe_backend():
+	client = DIFY_CLIENT.read_text(encoding="utf-8")
+	api = AGENT_API.read_text(encoding="utf-8")
+	assert 'frappe.conf.get("ione_agent_dify_api_key")' in client
+	assert 'f"Bearer {self.config.api_key}"' in client
+	assert 'f"{self.config.base_url}/chat-messages"' in client
+	assert "hmac.new(" in client
+	assert "def execute_dify_run(run_name: str)" in api
+	assert 'queue="long"' in api
 
 
 def test_crm_conversion_skips_missing_link_master_data():

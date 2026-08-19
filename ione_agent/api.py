@@ -6,6 +6,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, convert_utc_to_system_timezone, flt, get_datetime, now_datetime
 
+from ione_agent.dify import DifyClient, DifyError, stable_user_id
 from ione_agent.gateway import GatewayClient, GatewayError
 from ione_agent.lead_service import (
 	TASK_DTYPE,
@@ -110,6 +111,9 @@ def _serialize_run(doc, events: list[dict[str, Any]] | None = None) -> dict[str,
 		"progress": flt(doc.progress),
 		"current_stage": doc.current_stage,
 		"gateway_run_id": doc.gateway_run_id,
+		"dify_task_id": doc.dify_task_id,
+		"dify_message_id": doc.dify_message_id,
+		"dify_workflow_run_id": doc.dify_workflow_run_id,
 		"error_message": doc.error_message,
 		"started_at": doc.started_at,
 		"completed_at": doc.completed_at,
@@ -146,11 +150,25 @@ def get_bootstrap(session: str | None = None) -> dict[str, Any]:
 	selected = session or (sessions[0]["name"] if sessions else None)
 	messages = get_messages(selected) if selected else []
 
-	health = {"status": "unavailable", "runtime": "UFO3", "model": "Qwen"}
+	health = {"status": "unavailable", "runtime": "Dify", "model": "Qwen"}
 	try:
-		health.update(GatewayClient().health())
-	except GatewayError:
+		dify = DifyClient()
+		info = dify.get_info()
+		health.update(
+			{
+				"status": "healthy",
+				"runtime": "Dify",
+				"model": dify.config.model_label,
+				"app": info.get("name") or "Dify App",
+				"mode": info.get("mode") or "chat",
+			}
+		)
+	except DifyError:
 		pass
+	try:
+		health["desktop"] = GatewayClient().health()
+	except GatewayError:
+		health["desktop"] = {"status": "unavailable"}
 	try:
 		health["lead_discovery"] = OrchestratorClient().health()
 	except OrchestratorError:
@@ -206,6 +224,11 @@ def _execution_mode(message: str) -> str:
 	if _lead_intent_hint(message):
 		return "lead_discovery"
 	try:
+		DifyClient()
+		return "dify"
+	except DifyError:
+		pass
+	try:
 		return OrchestratorClient().classify(message)
 	except OrchestratorError:
 		return "desktop"
@@ -245,7 +268,11 @@ def send_message(
 	if active_run:
 		frappe.throw(_("当前对话仍有任务在执行，请等待完成或先停止任务。"))
 
-	run_type = execution_mode if execution_mode in {"desktop", "lead_discovery"} else _execution_mode(message)
+	run_type = (
+		execution_mode
+		if execution_mode in {"dify", "desktop", "lead_discovery"}
+		else _execution_mode(message)
+	)
 	user_message = _new_message(session=session_doc.name, user=user, role="user", content=message)
 	run = frappe.get_doc(
 		{
@@ -255,7 +282,10 @@ def send_message(
 			"status": "Queued",
 			"run_type": run_type,
 			"progress": 0,
-			"current_stage": "等待 AI 获客编排服务接收任务" if run_type == "lead_discovery" else "等待 UFO3 接收任务",
+			"current_stage": {
+				"dify": "等待 Dify 接收任务",
+				"lead_discovery": "等待 AI 获客编排服务接收任务",
+			}.get(run_type, "等待 UFO3 接收任务"),
 			"request_text": message,
 			"user_message": user_message.name,
 		}
@@ -274,6 +304,17 @@ def send_message(
 	)
 
 	history = get_messages(session_doc.name)[-20:]
+	if run_type == "dify":
+		frappe.enqueue(
+			"ione_agent.api.execute_dify_run",
+			queue="long",
+			timeout=900,
+			enqueue_after_commit=True,
+			job_id=f"ione-agent-dify-{run.name}",
+			run_name=run.name,
+		)
+		return {"session": session_doc.name, "run": _serialize_run(run), "accepted": True}
+
 	try:
 		if run_type == "lead_discovery":
 			task = create_task(user=user, request=message, agent_run=run.name, profile=profile)
@@ -352,11 +393,11 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 		return
 	if not run.assistant_message:
 		if status == "Completed":
-			content = run.response_text or (
-				"AI 获客任务已完成，候选线索已写入获客池。"
-				if run.run_type == "lead_discovery"
-				else "UFO3 已完成任务，但没有返回可显示的文本结果。"
-			)
+			fallback = {
+				"lead_discovery": "AI 获客任务已完成，候选线索已写入获客池。",
+				"dify": "Dify 已完成任务，但没有返回可显示的文本结果。",
+			}.get(run.run_type, "UFO3 已完成任务，但没有返回可显示的文本结果。")
+			content = run.response_text or fallback
 			message_type = "text"
 		else:
 			content = run.error_message or ("任务已停止。" if status == "Stopped" else "任务执行失败。")
@@ -382,6 +423,165 @@ def _sync_run(run, payload: dict[str, Any]) -> None:
 		},
 		update_modified=False,
 	)
+
+
+def _dify_stage(event: dict[str, Any]) -> str | None:
+	event_name = str(event.get("event") or "")
+	data = event.get("data") if isinstance(event.get("data"), dict) else {}
+	if event_name == "workflow_started":
+		return "Dify 工作流已启动"
+	if event_name == "node_started":
+		title = data.get("title") or data.get("node_type") or "工作流节点"
+		return f"正在执行：{title}"
+	if event_name == "node_finished":
+		title = data.get("title") or data.get("node_type") or "工作流节点"
+		return f"已完成：{title}"
+	if event_name in {"message", "agent_message"}:
+		return "正在生成回复"
+	if event_name in {"message_end", "workflow_finished"}:
+		return "正在保存结果"
+	return None
+
+
+def execute_dify_run(run_name: str) -> None:
+	"""Execute one Dify chat stream in a Frappe long worker."""
+	run = frappe.get_doc(RUN_DTYPE, run_name)
+	if run.status in TERMINAL_STATUSES:
+		return
+	started_at = now_datetime()
+	frappe.db.set_value(
+		RUN_DTYPE,
+		run.name,
+		{
+			"status": "Running",
+			"progress": 5,
+			"current_stage": "正在连接 Dify",
+			"started_at": started_at,
+		},
+		update_modified=False,
+	)
+	frappe.db.commit()
+
+	try:
+		client = DifyClient()
+		dify_user = stable_user_id(run.user)
+		session = frappe.get_doc(SESSION_DTYPE, run.session)
+		conversation_id = session.dify_conversation_id or None
+		answer_parts: list[str] = []
+		final_answer = ""
+		saw_agent_message = False
+		progress = 10
+		known_ids: dict[str, str] = {}
+		saved_ids: dict[str, str] = {}
+		last_stage = ""
+
+		for event in client.stream_chat(
+			query=run.request_text,
+			user=dify_user,
+			conversation_id=conversation_id,
+		):
+			run.reload()
+			if run.status == "Stopped":
+				return
+			event_name = str(event.get("event") or "")
+			if event.get("task_id") and not known_ids.get("dify_task_id"):
+				known_ids["dify_task_id"] = str(event["task_id"])
+			if event.get("message_id") and not known_ids.get("dify_message_id"):
+				known_ids["dify_message_id"] = str(event["message_id"])
+			if event.get("workflow_run_id") and not known_ids.get("dify_workflow_run_id"):
+				known_ids["dify_workflow_run_id"] = str(event["workflow_run_id"])
+			if event.get("conversation_id") and not conversation_id:
+				conversation_id = str(event["conversation_id"])
+				frappe.db.set_value(
+					SESSION_DTYPE,
+					session.name,
+					"dify_conversation_id",
+					conversation_id,
+					update_modified=False,
+				)
+
+			answer = event.get("answer")
+			if isinstance(answer, str) and answer:
+				if event_name == "agent_message":
+					saw_agent_message = True
+					answer_parts.append(answer)
+				elif event_name == "message" and saw_agent_message:
+					final_answer = answer
+				elif event_name == "message":
+					answer_parts.append(answer)
+
+			data = event.get("data") if isinstance(event.get("data"), dict) else {}
+			if event_name == "workflow_finished" and data.get("status") == "failed":
+				raise DifyError(str(data.get("error") or "Dify 工作流执行失败。"))
+
+			stage = _dify_stage(event)
+			new_ids = {key: value for key, value in known_ids.items() if saved_ids.get(key) != value}
+			if stage and (stage != last_stage or new_ids):
+				if event_name in {"node_started", "node_finished"}:
+					progress = min(85, progress + 5)
+				elif event_name in {"message", "agent_message"}:
+					progress = max(progress, 70)
+				elif event_name in {"message_end", "workflow_finished"}:
+					progress = 95
+				values: dict[str, Any] = {"current_stage": stage, "progress": progress, **new_ids}
+				frappe.db.set_value(RUN_DTYPE, run.name, values, update_modified=False)
+				frappe.db.commit()
+				last_stage = stage
+				saved_ids.update(new_ids)
+
+		run.reload()
+		if run.status == "Stopped":
+			return
+		response_text = final_answer or "".join(answer_parts).strip()
+		completed_at = now_datetime()
+		_sync_run(
+			run,
+			{
+				"status": "completed",
+				"progress": 100,
+				"current_stage": "Dify 任务已完成",
+				"answer": response_text,
+				"model": client.config.model_label,
+				"started_at": started_at.isoformat(),
+				"completed_at": completed_at.isoformat(),
+				"elapsed_seconds": (completed_at - started_at).total_seconds(),
+			},
+		)
+	except DifyError as exc:
+		run.reload()
+		if run.status == "Stopped":
+			return
+		completed_at = now_datetime()
+		_sync_run(
+			run,
+			{
+				"status": "failed",
+				"progress": run.progress,
+				"current_stage": "Dify 执行失败",
+				"error": str(exc),
+				"started_at": started_at.isoformat(),
+				"completed_at": completed_at.isoformat(),
+				"elapsed_seconds": (completed_at - started_at).total_seconds(),
+			},
+		)
+	except Exception as exc:
+		frappe.log_error(frappe.get_traceback(), f"I-ONE Dify run failed: {run_name}")
+		run.reload()
+		if run.status == "Stopped":
+			return
+		completed_at = now_datetime()
+		_sync_run(
+			run,
+			{
+				"status": "failed",
+				"progress": run.progress,
+				"current_stage": "Dify 执行失败",
+				"error": f"Dify 后台任务异常：{exc}",
+				"started_at": started_at.isoformat(),
+				"completed_at": completed_at.isoformat(),
+				"elapsed_seconds": (completed_at - started_at).total_seconds(),
+			},
+		)
 
 
 def _run_needs_poll(doc) -> bool:
@@ -415,6 +615,22 @@ def get_run(run: str) -> dict[str, Any]:
 def stop_run(run: str) -> dict[str, Any]:
 	doc = _owned_doc(RUN_DTYPE, run)
 	if doc.status in TERMINAL_STATUSES:
+		return _serialize_run(doc)
+	if doc.run_type == "dify":
+		try:
+			if doc.dify_task_id:
+				DifyClient().stop_chat(doc.dify_task_id, stable_user_id(doc.user))
+			_sync_run(
+				doc,
+				{
+					"status": "stopped",
+					"progress": doc.progress,
+					"current_stage": "Dify 任务已停止",
+					"completed_at": now_datetime().isoformat(),
+				},
+			)
+		except DifyError as exc:
+			frappe.throw(str(exc))
 		return _serialize_run(doc)
 	if doc.gateway_run_id:
 		try:
