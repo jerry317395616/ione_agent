@@ -4,8 +4,9 @@ I-ONE Agent is a Frappe application for enterprise conversations, verifiable lea
 
 ## Architecture
 
-- Frappe: authentication, permissions, session/message persistence and the `/agent` user interface.
-- Dify: published chat application, workflow/agent orchestration and its own administrator console.
+- Frappe: authentication, permissions, session/message persistence and the `/agent` and `/dify` launchers.
+- Codex App Server: the only interactive chat core for I-ONE Agent, reached through the per-site Codex Bridge and LibreChat frontend.
+- Dify: a separate workflow/application administration platform reached through Frappe-gated OAuth; it is not an I-ONE Agent chat runtime.
 - Lead Intelligence Orchestrator: governed LangGraph model/tool loop with persistent checkpoints, typed tools, policy enforcement and idempotent result synchronization.
 - Hermes Agent: internet research against configured official tender and procurement sources.
 - DeepSeek: first-stage planning model and final specialist reviewer for qualified leads.
@@ -32,22 +33,45 @@ The computer makes an outbound-only TLS WebSocket connection. It does not expose
 
 ```json
 {
-  "ione_agent_dify_base_url": "https://dify.example.com/v1",
-  "ione_agent_dify_api_key": "app-secret-from-a-published-dify-chat-app",
-  "ione_agent_dify_user_secret": "replace-with-a-long-random-secret",
-  "ione_agent_dify_model_label": "Qwen3-35B-A3B-FP8",
+  "ione_agent_frontend_url": "https://agent.example.com",
+  "ione_agent_sso_shared_secret": "replace-with-a-long-random-secret",
   "ione_agent_gateway_url": "http://10.144.133.1:8098",
   "ione_agent_gateway_token": "replace-with-a-long-random-token",
   "ione_agent_orchestrator_url": "http://10.144.133.1:8100",
-  "ione_agent_orchestrator_token": "replace-with-a-different-long-random-token"
+  "ione_agent_orchestrator_token": "replace-with-a-different-long-random-token",
+  "ione_agent_dify_origin": "https://dify.example.com",
+  "ione_agent_dify_oauth_login_url": "https://dify.example.com/console/api/oauth/login/frappe?redirect_url=/apps"
 }
 ```
 
-Normal chat is sent from the Frappe backend to the published Dify app. The Dify API key never reaches
-the browser, and Frappe users are represented in Dify by stable HMAC identifiers instead of email
-addresses. Dify task, message, workflow and conversation identifiers are stored with the Frappe run
-for permission checks and auditing. Lead discovery and controlled desktop execution retain their
-specialized runtimes.
+`/agent` remains the I-ONE Agent entry point. In a companion deployment it redirects into LibreChat,
+whose bridge owns the Codex App Server conversation. New Frappe agent runs can only be classified as
+controlled desktop execution or lead discovery; `execution_mode=dify` is rejected. Existing Dify run,
+task, message, workflow and conversation fields remain readable, and historical in-flight Dify runs
+can still be polled or stopped during migration.
+
+## Standalone Dify launcher
+
+`/dify` is intentionally separate from `/agent`. It requires a logged-in Frappe user with the
+**System Manager** or **I-ONE Agent Manager** role (the Administrator account is also accepted), then
+redirects to the configured Dify OAuth provider endpoint. The Dify fork must expose the `frappe`
+provider and the corresponding Frappe OAuth Client must use Dify's callback URL.
+
+For those authorized users, the Frappe v17 boot hook adds a distinct **Dify** icon to the Apps page.
+It is a virtual `dify_launcher` entry that opens `/dify`; it does not register another Frappe app or
+add Dify to I-ONE Agent's own `add_to_apps_screen` declaration. Users without a Dify management role
+receive neither the icon nor access to the launcher.
+
+The launcher accepts no target from the browser and adds no Frappe token, email or API key to the
+URL. Both settings above are required: the origin must be HTTPS, the login URL must use the same
+origin and `/console/api/oauth/login/frappe` path, and its only optional query parameter is a
+same-site local `redirect_url` such as `/apps`. Do not use an iframe, shared cross-subdomain cookies,
+or the legacy published-app API key for this login flow.
+
+The legacy `ione_agent_dify_base_url`, `ione_agent_dify_api_key`,
+`ione_agent_dify_user_secret` and `ione_agent_dify_model_label` settings are used only to finish or
+stop historical Dify-backed I-ONE runs. They are not consulted when routing new chat messages and can
+be removed after no non-terminal historical runs remain.
 
 ## Gateway configuration
 

@@ -11,6 +11,9 @@ AGENT_TEMPLATE = APP_ROOT / "www" / "agent.html"
 AGENT_SCRIPT = APP_ROOT / "public" / "js" / "agent.js"
 AGENT_API = APP_ROOT / "api.py"
 DIFY_CLIENT = APP_ROOT / "dify.py"
+DIFY_PAGE = APP_ROOT / "www" / "dify.py"
+DIFY_LOGO = APP_ROOT / "public" / "images" / "dify-logo.svg"
+HOOKS = APP_ROOT / "hooks.py"
 LEAD_SERVICE = APP_ROOT / "lead_service.py"
 
 
@@ -100,6 +103,7 @@ def test_dify_conversations_and_runs_are_auditable():
 	assert session_fields["dify_conversation_id"]["read_only"] == 1
 	assert session_fields["dify_conversation_id"]["unique"] == 1
 	assert "dify" in run_fields["run_type"]["options"].splitlines()
+	assert run_fields["run_type"]["default"] == "desktop"
 	for fieldname in ("dify_task_id", "dify_message_id", "dify_workflow_run_id"):
 		assert run_fields[fieldname]["read_only"] == 1
 
@@ -112,7 +116,39 @@ def test_dify_api_key_stays_in_the_frappe_backend():
 	assert 'f"{self.config.base_url}/chat-messages"' in client
 	assert "hmac.new(" in client
 	assert "def execute_dify_run(run_name: str)" in api
-	assert 'queue="long"' in api
+	assert 'if doc.run_type == "dify":' in api
+
+
+def test_new_agent_runs_do_not_route_to_dify():
+	api = AGENT_API.read_text(encoding="utf-8")
+	execution_mode = api.split("def _execution_mode(message: str)", 1)[1].split(
+		"@frappe.whitelist()", 1
+	)[0]
+	assert "DifyClient" not in execution_mode
+	assert 'requested not in {"desktop", "lead_discovery"}' in execution_mode
+	assert 'run_type == "dify"' not in api.split("def send_message(", 1)[1].split(
+		"def _sync_run", 1
+	)[0]
+	assert 'if doc.run_type == "dify":' in api
+
+
+def test_dify_page_requires_frappe_role_gate_and_redirects_without_a_token():
+	page = DIFY_PAGE.read_text(encoding="utf-8")
+	assert 'user == "Guest"' in page
+	assert "has_dify_permission(user)" in page
+	assert 'frappe.conf.get("ione_agent_dify_oauth_login_url")' in page
+	assert "redirect_location = _configured_login_url()" in page
+	assert "token=" not in page
+
+
+def test_dify_launcher_uses_bootinfo_without_declaring_a_second_installed_app():
+	hooks = HOOKS.read_text(encoding="utf-8")
+	assert 'extend_bootinfo = ["ione_agent.boot.extend_bootinfo"]' in hooks
+	assert hooks.count('"name": app_name') == 1
+	assert "dify_launcher" not in hooks.split("add_to_apps_screen =", 1)[1].split(
+		"extend_bootinfo =", 1
+	)[0]
+	assert DIFY_LOGO.is_file()
 
 
 def test_crm_conversion_skips_missing_link_master_data():

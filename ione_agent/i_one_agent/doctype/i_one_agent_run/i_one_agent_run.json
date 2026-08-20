@@ -8,7 +8,7 @@
  "fields": [
   {"fieldname": "session", "fieldtype": "Link", "label": "对话", "options": "I-ONE Agent Session", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
   {"fieldname": "user", "fieldtype": "Link", "label": "用户", "options": "User", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
-  {"fieldname": "run_type", "fieldtype": "Select", "label": "运行类型", "options": "dify\ndesktop\nlead_discovery", "default": "dify", "reqd": 1, "in_standard_filter": 1},
+  {"fieldname": "run_type", "fieldtype": "Select", "label": "运行类型", "options": "dify\ndesktop\nlead_discovery", "default": "desktop", "reqd": 1, "in_standard_filter": 1},
   {"fieldname": "discovery_task", "fieldtype": "Link", "label": "获客任务", "options": "I-ONE Lead Discovery Task", "read_only": 1},
   {"fieldname": "status", "fieldtype": "Select", "label": "状态", "options": "Queued\nRunning\nCompleted\nFailed\nStopped", "default": "Queued", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
   {"fieldname": "progress", "fieldtype": "Percent", "label": "进度", "read_only": 1, "default": "0"},

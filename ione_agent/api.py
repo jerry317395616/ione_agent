@@ -150,25 +150,11 @@ def get_bootstrap(session: str | None = None) -> dict[str, Any]:
 	selected = session or (sessions[0]["name"] if sessions else None)
 	messages = get_messages(selected) if selected else []
 
-	health = {"status": "unavailable", "runtime": "Dify", "model": "Qwen"}
+	health = {"status": "unavailable", "runtime": "UFO3", "model": "Qwen"}
 	try:
-		dify = DifyClient()
-		info = dify.get_info()
-		health.update(
-			{
-				"status": "healthy",
-				"runtime": "Dify",
-				"model": dify.config.model_label,
-				"app": info.get("name") or "Dify App",
-				"mode": info.get("mode") or "chat",
-			}
-		)
-	except DifyError:
-		pass
-	try:
-		health["desktop"] = GatewayClient().health()
+		health.update(GatewayClient().health())
 	except GatewayError:
-		health["desktop"] = {"status": "unavailable"}
+		pass
 	try:
 		health["lead_discovery"] = OrchestratorClient().health()
 	except OrchestratorError:
@@ -224,14 +210,22 @@ def _execution_mode(message: str) -> str:
 	if _lead_intent_hint(message):
 		return "lead_discovery"
 	try:
-		DifyClient()
-		return "dify"
-	except DifyError:
-		pass
-	try:
-		return OrchestratorClient().classify(message)
+		classified = OrchestratorClient().classify(message)
+		return classified if classified in {"desktop", "lead_discovery"} else "desktop"
 	except OrchestratorError:
 		return "desktop"
+
+
+def _new_execution_mode(message: str, requested: str | None) -> str:
+	requested = str(requested or "").strip().lower()
+	if not requested:
+		return _execution_mode(message)
+	if requested not in {"desktop", "lead_discovery"}:
+		frappe.throw(
+			_("不支持的执行模式。Dify 已与 I-ONE Agent 对话入口分离。"),
+			frappe.ValidationError,
+		)
+	return requested
 
 
 @frappe.whitelist()
@@ -268,11 +262,7 @@ def send_message(
 	if active_run:
 		frappe.throw(_("当前对话仍有任务在执行，请等待完成或先停止任务。"))
 
-	run_type = (
-		execution_mode
-		if execution_mode in {"dify", "desktop", "lead_discovery"}
-		else _execution_mode(message)
-	)
+	run_type = _new_execution_mode(message, execution_mode)
 	user_message = _new_message(session=session_doc.name, user=user, role="user", content=message)
 	run = frappe.get_doc(
 		{
@@ -282,10 +272,11 @@ def send_message(
 			"status": "Queued",
 			"run_type": run_type,
 			"progress": 0,
-			"current_stage": {
-				"dify": "等待 Dify 接收任务",
-				"lead_discovery": "等待 AI 获客编排服务接收任务",
-			}.get(run_type, "等待 UFO3 接收任务"),
+			"current_stage": (
+				"等待 AI 获客编排服务接收任务"
+				if run_type == "lead_discovery"
+				else "等待 UFO3 接收任务"
+			),
 			"request_text": message,
 			"user_message": user_message.name,
 		}
@@ -304,17 +295,6 @@ def send_message(
 	)
 
 	history = get_messages(session_doc.name)[-20:]
-	if run_type == "dify":
-		frappe.enqueue(
-			"ione_agent.api.execute_dify_run",
-			queue="long",
-			timeout=900,
-			enqueue_after_commit=True,
-			job_id=f"ione-agent-dify-{run.name}",
-			run_name=run.name,
-		)
-		return {"session": session_doc.name, "run": _serialize_run(run), "accepted": True}
-
 	try:
 		if run_type == "lead_discovery":
 			task = create_task(user=user, request=message, agent_run=run.name, profile=profile)

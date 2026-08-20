@@ -19,6 +19,13 @@ def has_app_permission(user: str | None = None) -> bool:
 	return user not in {"Guest", ""} and bool(APP_ROLES.intersection(frappe.get_roles(user)))
 
 
+def has_dify_permission(user: str | None = None) -> bool:
+	user = _user(user)
+	return user == "Administrator" or (
+		user not in {"Guest", ""} and bool(MANAGER_ROLES.intersection(frappe.get_roles(user)))
+	)
+
+
 def _owner_query(user: str | None = None) -> str:
 	user = _user(user)
 	if user == "Administrator" or _is_manager(user):

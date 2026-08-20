@@ -18,6 +18,8 @@ add_to_apps_screen = [
 	}
 ]
 
+extend_bootinfo = ["ione_agent.boot.extend_bootinfo"]
+
 before_install = "ione_agent.setup.install.before_install"
 after_install = "ione_agent.setup.install.after_install"
 after_migrate = "ione_agent.setup.install.after_migrate"
