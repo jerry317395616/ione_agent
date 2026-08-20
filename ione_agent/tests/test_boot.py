@@ -77,3 +77,31 @@ def test_dify_virtual_app_is_hidden_until_both_launcher_settings_exist(monkeypat
 	)
 	boot.extend_bootinfo(bootinfo)
 	assert [item["app_name"] for item in bootinfo["app_data"]] == ["dify_launcher"]
+
+
+def test_dify_virtual_icon_supports_desktop_icons_mode(monkeypatch):
+	permission = {"allowed": True}
+	config = {
+		"ione_agent_dify_origin": "https://dify.myyr.top",
+		"ione_agent_dify_oauth_login_url": (
+			"https://dify.myyr.top/console/api/oauth/login/frappe?redirect_url=/apps"
+		),
+	}
+	boot = _load_boot_module(monkeypatch, permission, config)
+	bootinfo = {
+		"app_data": [],
+		"desktop_icons": [{"name": "I-ONE Agent", "link": "/agent"}],
+	}
+
+	boot.extend_bootinfo(bootinfo)
+	boot.extend_bootinfo(bootinfo)
+	dify_icons = [item for item in bootinfo["desktop_icons"] if item["name"] == "Dify"]
+	assert dify_icons == [boot.DIFY_DESKTOP_ICON_DATA]
+	assert dify_icons[0]["link"] == "/dify"
+	assert dify_icons[0]["logo_url"] == "/assets/ione_agent/images/dify-logo.svg"
+	assert dify_icons[0]["restrict_removal"] == 1
+
+	permission["allowed"] = False
+	boot.extend_bootinfo(bootinfo)
+	assert all(item["name"] != "Dify" for item in bootinfo["desktop_icons"])
+	assert all(item["app_name"] != "dify_launcher" for item in bootinfo["app_data"])
