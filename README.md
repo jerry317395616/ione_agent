@@ -50,14 +50,14 @@ controlled desktop execution or lead discovery; `execution_mode=dify` is rejecte
 task, message, workflow and conversation fields remain readable, and historical in-flight Dify runs
 can still be polled or stopped during migration.
 
-## Standalone Dify launcher
+## Standalone I-ONE workflow launcher
 
 `/dify` is intentionally separate from `/agent`. It requires a logged-in Frappe user with the
 **System Manager** or **I-ONE Agent Manager** role (the Administrator account is also accepted), then
 redirects to the configured Dify OAuth provider endpoint. The Dify fork must expose the `frappe`
 provider and the corresponding Frappe OAuth Client must use Dify's callback URL.
 
-For those authorized users, the Frappe v17 boot hook adds a distinct **Dify** icon to the Apps page.
+For those authorized users, the Frappe v17 boot hook adds a distinct **I-ONE** icon to the Apps page.
 It is a virtual `dify_launcher` entry that opens `/dify`; it does not register another Frappe app or
 add Dify to I-ONE Agent's own `add_to_apps_screen` declaration. Users without a Dify management role
 receive neither the icon nor access to the launcher.

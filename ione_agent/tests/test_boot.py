@@ -32,7 +32,12 @@ def test_dify_virtual_app_is_permission_gated_v17_shaped_and_idempotent(monkeypa
 		),
 	}
 	boot = _load_boot_module(monkeypatch, permission, config)
-	bootinfo = {"app_data": [{"app_name": "ione_agent"}]}
+	bootinfo = {
+		"app_data": [
+			{"app_name": "ione_agent"},
+			{"app_name": "dify_launcher", "app_title": "Dify"},
+		]
+	}
 
 	boot.extend_bootinfo(bootinfo)
 	assert [item["app_name"] for item in bootinfo["app_data"]] == ["ione_agent"]
@@ -50,9 +55,9 @@ def test_dify_virtual_app_is_permission_gated_v17_shaped_and_idempotent(monkeypa
 			"on_apps_screen": True,
 			"sequence_id": 110,
 			"app_name": "dify_launcher",
-			"app_title": "Dify",
+			"app_title": "I-ONE",
 			"app_route": "/dify",
-			"app_logo_url": "/assets/ione_agent/images/dify-logo.svg",
+			"app_logo_url": "/assets/ione_agent/images/ione-workspace-logo.svg",
 			"modules": [],
 			"workspaces": [],
 		}
@@ -90,18 +95,22 @@ def test_dify_virtual_icon_supports_desktop_icons_mode(monkeypatch):
 	boot = _load_boot_module(monkeypatch, permission, config)
 	bootinfo = {
 		"app_data": [],
-		"desktop_icons": [{"name": "I-ONE Agent", "link": "/agent"}],
+		"desktop_icons": [
+			{"name": "I-ONE Agent", "link": "/agent"},
+			{"name": "Dify", "link": "/dify"},
+		],
 	}
 
 	boot.extend_bootinfo(bootinfo)
 	boot.extend_bootinfo(bootinfo)
-	dify_icons = [item for item in bootinfo["desktop_icons"] if item["name"] == "Dify"]
-	assert dify_icons == [boot.DIFY_DESKTOP_ICON_DATA]
-	assert dify_icons[0]["link"] == "/dify"
-	assert dify_icons[0]["logo_url"] == "/assets/ione_agent/images/dify-logo.svg"
-	assert dify_icons[0]["restrict_removal"] == 1
+	workspace_icons = [item for item in bootinfo["desktop_icons"] if item["name"] == "I-ONE"]
+	assert workspace_icons == [boot.DIFY_DESKTOP_ICON_DATA]
+	assert workspace_icons[0]["link"] == "/dify"
+	assert workspace_icons[0]["logo_url"] == "/assets/ione_agent/images/ione-workspace-logo.svg"
+	assert workspace_icons[0]["restrict_removal"] == 1
+	assert all(item["name"] != "Dify" for item in bootinfo["desktop_icons"])
 
 	permission["allowed"] = False
 	boot.extend_bootinfo(bootinfo)
-	assert all(item["name"] != "Dify" for item in bootinfo["desktop_icons"])
+	assert all(item["name"] not in {"Dify", "I-ONE"} for item in bootinfo["desktop_icons"])
 	assert all(item["app_name"] != "dify_launcher" for item in bootinfo["app_data"])
