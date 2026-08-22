@@ -29,6 +29,8 @@ description: 童健云业务专用操作规范。处理健康数据、膳食营�
 - `Tongjianyun Meal Attendance`
 - `Tongjianyun Meal Nutrition`
 - `Tongjianyun Nutrition Standard`
+- `Tongjianyun Nutrition Rule Set`
+- `Tongjianyun Nutrition Rule Revision`
 - `Tongjianyun Recipe`
 - `Tongjianyun Recipe Dish`
 - `Tongjianyun Recipe Ingredient`
@@ -57,3 +59,8 @@ description: 童健云业务专用操作规范。处理健康数据、膳食营�
 
 - 用户要求分析、重新分析、导出或下载已经导入或已经存在的食谱时，加载 `analyze-tongjianyun-recipe` Skill。
 - 分析必须使用 `frappe_generate_tongjianyun_recipe_analysis` 生成确定性 Excel 报告，不要由模型自行计算营养数据。
+
+## 营养计算规则
+
+- 用户要求调整营养值公式、可食部、烹调保留率、达标阈值或供能比例时，加载 `manage-tongjianyun-nutrition-rules` Skill。
+- 不使用通用文档写入工具修改营养规则；只使用专用规则工具，确保版本、试算、审批和审计链完整。

@@ -22,6 +22,12 @@ DEFAULT_MCP_TOOLS = (
 	"frappe_update_document",
 	"frappe_upsert_tongjianyun_recipe",
 	"frappe_generate_tongjianyun_recipe_analysis",
+	"frappe_list_tongjianyun_nutrition_rules",
+	"frappe_create_tongjianyun_nutrition_rule_draft",
+	"frappe_preview_tongjianyun_nutrition_rule",
+	"frappe_submit_tongjianyun_nutrition_rule",
+	"frappe_publish_tongjianyun_nutrition_rule",
+	"frappe_rollback_tongjianyun_nutrition_rule",
 	"frappe_attach_text_file",
 	"frappe_attach_word_file",
 	"frappe_create_crm_lead_package",
@@ -53,6 +59,12 @@ use the spreadsheet Skill and executable Python or Excel formulas in the assigne
 owns the analysis design, but every numeric result must be reproducible: keep units explicit, document
 data sources and formulas, run consistency checks, validate the final workbook and clearly identify
 missing source data. Never invent nutrient values or present unexecuted mental arithmetic as verified.
+When an authorized user asks to change Tongjianyun nutrition calculations, load the
+manage-tongjianyun-nutrition-rules Skill. Always create a versioned draft and preview it against a
+real recipe before submission. Publishing and rollback are exceptional controlled transitions:
+perform them only after the user explicitly confirms the exact rule version in the current
+conversation, and pass the confirmation phrase required by the server. Never bypass role checks,
+never execute arbitrary code from a formula and never edit a published rule in place.
 When the user asks to inspect, extend or redesign an existing Excel workbook, use the
 frappe-spreadsheets Skill and its stage, OfficeCLI and publish tools. Return a real .xlsx attachment;
 never replace a requested workbook with text, CSV, JSON or a description of multiple sheets.

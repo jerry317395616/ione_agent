@@ -59,6 +59,12 @@ _TOOL_LABELS = {
 	"frappe_update_document": "更新业务记录",
 	"frappe_upsert_tongjianyun_recipe": "保存童健云完整食谱",
 	"frappe_generate_tongjianyun_recipe_analysis": "生成食谱带量分析报告",
+	"frappe_list_tongjianyun_nutrition_rules": "查询营养计算规则",
+	"frappe_create_tongjianyun_nutrition_rule_draft": "创建营养规则草稿",
+	"frappe_preview_tongjianyun_nutrition_rule": "试算营养规则",
+	"frappe_submit_tongjianyun_nutrition_rule": "提交营养规则审核",
+	"frappe_publish_tongjianyun_nutrition_rule": "发布营养规则",
+	"frappe_rollback_tongjianyun_nutrition_rule": "回滚营养规则",
 	"frappe_list_attachments": "查询业务附件",
 	"frappe_attach_text_file": "保存文本附件",
 	"frappe_attach_word_file": "保存文档附件",
@@ -647,7 +653,21 @@ class CodexBridge:
 			"增加一页",
 			"修改表格",
 		)
-		if any(marker in text for marker in spreadsheet_markers):
+		nutrition_rule_markers = (
+			"营养计算规则",
+			"营养值计算",
+			"计算方式",
+			"计算公式",
+			"可食部",
+			"保留率",
+			"营养阈值",
+			"发布规则",
+			"回滚规则",
+		)
+		if "营养" in text and any(marker in text for marker in nutrition_rule_markers):
+			skill_name = "manage-tongjianyun-nutrition-rules"
+			reference_name = "rule-contract.md"
+		elif any(marker in text for marker in spreadsheet_markers):
 			skill_name = "frappe-spreadsheets"
 			reference_name = "tool-contract.md"
 		else:

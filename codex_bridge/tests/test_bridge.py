@@ -487,6 +487,9 @@ def test_tool_risk_policy_blocks_irreversible_operations() -> None:
 	assert tool_risk_level("frappe_delete_document") == "restricted"
 	assert tool_risk_level("frappe_submit_document") == "restricted"
 	assert tool_risk_level("frappe_update_permission") == "restricted"
+	assert tool_risk_level("frappe_submit_tongjianyun_nutrition_rule") == "controlled_write"
+	assert tool_risk_level("frappe_publish_tongjianyun_nutrition_rule") == "controlled_write"
+	assert tool_risk_level("frappe_rollback_tongjianyun_nutrition_rule") == "controlled_write"
 
 
 def test_dynamic_tool_proxy_filters_and_calls_enabled_tools(monkeypatch) -> None:

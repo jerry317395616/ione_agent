@@ -58,12 +58,19 @@ RESTRICTED_TOOL_MARKERS = (
 	"system_config",
 	"unsafe",
 )
+CONTROLLED_TRANSITION_TOOLS = {
+	"frappe_submit_tongjianyun_nutrition_rule",
+	"frappe_publish_tongjianyun_nutrition_rule",
+	"frappe_rollback_tongjianyun_nutrition_rule",
+}
 
 
 def tool_risk_level(name: str) -> str:
 	"""Return the product risk level used before a tool reaches the model."""
 
 	normalized = str(name or "").strip().lower()
+	if normalized in CONTROLLED_TRANSITION_TOOLS:
+		return "controlled_write"
 	if any(marker in normalized for marker in RESTRICTED_TOOL_MARKERS):
 		return "restricted"
 	if normalized.startswith(
