@@ -60,7 +60,7 @@ def test_dify_virtual_app_is_permission_gated_v17_shaped_and_idempotent(monkeypa
 			"on_apps_screen": True,
 			"sequence_id": 110,
 			"app_name": "dify_launcher",
-			"app_title": "I-ONE",
+			"app_title": "智能工作台",
 			"app_route": "/dify",
 			"app_logo_url": "/assets/ione_agent/images/ione-workspace-logo.svg",
 			"modules": [],
@@ -112,7 +112,7 @@ def test_dify_virtual_icon_supports_desktop_icons_mode(monkeypatch):
 
 	boot.extend_bootinfo(bootinfo)
 	boot.extend_bootinfo(bootinfo)
-	workspace_icons = [item for item in bootinfo["desktop_icons"] if item["name"] == "I-ONE"]
+	workspace_icons = [item for item in bootinfo["desktop_icons"] if item["name"] == "智能工作台"]
 	assert workspace_icons == [boot.DIFY_DESKTOP_ICON_DATA]
 	assert workspace_icons[0]["link"] == "/dify"
 	assert workspace_icons[0]["logo_url"] == "/assets/ione_agent/images/ione-workspace-logo.svg"
@@ -121,7 +121,7 @@ def test_dify_virtual_icon_supports_desktop_icons_mode(monkeypatch):
 
 	permission["allowed"] = False
 	boot.extend_bootinfo(bootinfo)
-	assert all(item["name"] not in {"Dify", "I-ONE"} for item in bootinfo["desktop_icons"])
+	assert all(item["name"] not in {"Dify", "智能工作台"} for item in bootinfo["desktop_icons"])
 	assert all(item["app_name"] != "dify_launcher" for item in bootinfo["app_data"])
 
 
@@ -138,11 +138,11 @@ def test_harness_virtual_launcher_uses_ione_agent_permission(monkeypatch):
 	assert [item for item in bootinfo["app_data"] if item["app_name"] == "ione_harness_launcher"] == [
 		boot.HARNESS_APP_DATA
 	]
-	assert [item for item in bootinfo["desktop_icons"] if item["name"] == "IONE Harness"] == [
+	assert [item for item in bootinfo["desktop_icons"] if item["name"] == "智能助手"] == [
 		boot.HARNESS_DESKTOP_ICON_DATA
 	]
 
 	permission["app_allowed"] = False
 	boot.extend_bootinfo(bootinfo)
 	assert all(item["app_name"] != "ione_harness_launcher" for item in bootinfo["app_data"])
-	assert all(item["name"] != "IONE Harness" for item in bootinfo["desktop_icons"])
+	assert all(item["name"] != "智能助手" for item in bootinfo["desktop_icons"])

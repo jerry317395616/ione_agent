@@ -8,9 +8,9 @@ from ione_agent.permissions import has_app_permission, has_dify_permission
 
 DIFY_APP_NAME = "dify_launcher"
 HARNESS_APP_NAME = "ione_harness_launcher"
-IONE_WORKSPACE_TITLE = "I-ONE"
+IONE_WORKSPACE_TITLE = "智能工作台"
 IONE_WORKSPACE_LOGO = "/assets/ione_agent/images/ione-workspace-logo.svg"
-HARNESS_TITLE = "IONE Harness"
+HARNESS_TITLE = "智能助手"
 HARNESS_ROUTE = "/api/method/ione_core.harness_auth.launch"
 DIFY_APP_DATA = {
 	"on_apps_screen": True,
