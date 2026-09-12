@@ -33,7 +33,7 @@ class StructuredTaskClient:
 
 	endpoint: str | None = None
 	token: str | None = None
-	model: str = "qwen3.6-35b-a3b-fp8"
+	model: str = "ione-pro"
 	timeout: float = 90.0
 
 	@classmethod
@@ -226,4 +226,3 @@ def _best_dish_index(ingredient: str, dishes: list[str]) -> int:
 
 def _canonical(value: str) -> str:
 	return re.sub(r"[\s,，、;；:：/|·。．（）()【】\[\]—_\-]+", "", value or "")
-
