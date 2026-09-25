@@ -130,7 +130,7 @@ def test_harness_virtual_launcher_uses_ione_agent_permission(monkeypatch):
 	boot = _load_boot_module(monkeypatch, permission, {})
 	bootinfo = {
 		"app_data": [{"app_name": "ione_harness_launcher", "app_title": "old"}],
-		"desktop_icons": [{"name": "IONE Harness", "link": boot.HARNESS_ROUTE}],
+		"desktop_icons": [{"name": "IONE Harness", "link": boot.LEGACY_HARNESS_ROUTE}],
 	}
 
 	boot.extend_bootinfo(bootinfo)
@@ -141,6 +141,13 @@ def test_harness_virtual_launcher_uses_ione_agent_permission(monkeypatch):
 	assert [item for item in bootinfo["desktop_icons"] if item["name"] == "智能助手"] == [
 		boot.HARNESS_DESKTOP_ICON_DATA
 	]
+	assert boot.HARNESS_ROUTE == "https://chat.qwen.ai/"
+	assert boot.HARNESS_APP_DATA["app_route"] == "https://chat.qwen.ai/"
+	assert boot.HARNESS_DESKTOP_ICON_DATA["link"] == "https://chat.qwen.ai/"
+	assert boot.HARNESS_DESKTOP_ICON_DATA["link_type"] == "External"
+	assert all(
+		item.get("link") != boot.LEGACY_HARNESS_ROUTE for item in bootinfo["desktop_icons"]
+	)
 
 	permission["app_allowed"] = False
 	boot.extend_bootinfo(bootinfo)

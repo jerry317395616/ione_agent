@@ -1,0 +1,22 @@
+/*
+ * Qwen companion 2.1.4
+ * Only the real Qwen logo image is hidden statically.
+ * Shared Qwen component classes are never hidden globally.
+ */
+img.logo-img[alt="logo"][src*="qwen-logo.svg"] {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Only elements positively identified by the exact Qwen3.8-Max DOM matcher. */
+div.wms-trigger__content[data-ione-v213-model-hidden="1"] {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Only sidebar entries positively identified by exact text: 社区 / Coder. */
+div.sidebar-entry-list-content[data-ione-v214-sidebar-hidden] {
+  display: none !important;
+}

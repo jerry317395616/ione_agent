@@ -11,7 +11,11 @@ HARNESS_APP_NAME = "ione_harness_launcher"
 IONE_WORKSPACE_TITLE = "智能工作台"
 IONE_WORKSPACE_LOGO = "/assets/ione_agent/images/ione-workspace-logo.svg"
 HARNESS_TITLE = "智能助手"
-HARNESS_ROUTE = "/api/method/ione_core.harness_auth.launch"
+LEGACY_HARNESS_ROUTE = "/api/method/ione_core.harness_auth.launch"
+QWEN_ROUTE = "https://chat.qwen.ai/"
+# Kept as an alias because the existing virtual launcher uses the historical
+# ione_harness_launcher app key. The visible destination is Qwen.
+HARNESS_ROUTE = QWEN_ROUTE
 DIFY_APP_DATA = {
 	"on_apps_screen": True,
 	"sequence_id": 110,
@@ -93,7 +97,7 @@ def _is_workspace_launcher_icon(item: Any) -> bool:
 
 
 def _is_harness_launcher_icon(item: Any) -> bool:
-	return _desktop_icon_link(item) == HARNESS_ROUTE or _desktop_icon_name(item) == HARNESS_TITLE
+	return _desktop_icon_link(item) in {HARNESS_ROUTE, LEGACY_HARNESS_ROUTE} or _desktop_icon_name(item) == HARNESS_TITLE
 
 
 def extend_bootinfo(bootinfo) -> None:
